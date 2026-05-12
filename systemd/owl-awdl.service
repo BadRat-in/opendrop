@@ -5,7 +5,7 @@ After=network.target
 Before=network-online.target
 
 [Service]
-Type=forking
+Type=simple
 RemainAfterExit=no
 User=root
 Group=root
@@ -17,20 +17,27 @@ ExecStartPre=/usr/bin/sleep 1
 
 # Start the OWL daemon on the monitor interface
 # OWL will automatically create the awdl0 TUN interface
+# Note: OWL runs in foreground, so Type=simple (not forking)
 ExecStart=/usr/local/bin/owl -i mon0
 
 # Clean up on stop: remove the virtual monitor interface
 # This also removes awdl0 since it's tied to OWL's lifecycle
 ExecStopPost=/usr/sbin/iw dev mon0 del
-ExecStopPost=/usr/bin/sleep 1
+ExecStopPost=/usr/bin/sleep 2
 
 # Restore WiFi connectivity after OWL stops
-ExecStopPost=/usr/bin/nmcli dev connect wlo1
+# Use 'up' to bring interface back online (works without password)
+ExecStopPost=/usr/sbin/ip link set wlo1 up
+ExecStopPost=/usr/bin/sleep 2
+
+# Attempt to reconnect to saved WiFi networks
+# This uses NetworkManager's existing credentials
+ExecStopPost=/usr/bin/nmcli device connect wlo1
 
 # Don't restart OWL automatically on failure
 # Users should explicitly start/stop via the GUI or systemctl
 Restart=no
-KillMode=mixed
+KillMode=process
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=owl-awdl
