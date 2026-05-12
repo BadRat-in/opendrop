@@ -1,5 +1,6 @@
 """
 OpenDrop: an open source AirDrop implementation
+Copyright (C) 2024  Ravindra K. (GUI extension)
 Copyright (C) 2018  Milan Stute
 Copyright (C) 2018  Alexander Heinrich
 
@@ -15,17 +16,13 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+OpenDrop GUI module.
+
+This module provides a PyQt6-based graphical interface for OpenDrop,
+including system tray integration, OWL lifecycle management, and AirDrop
+send/receive capabilities.
+
+GUI extension by Ravindra K. for seemoo-lab/opendrop
+Original AirDrop protocol work by Milan Stute and Alexander Heinrich
 """
-
-import logging
-import os
-import platform
-
-__version__ = "0.14.0"
-
-if platform.system() == "Darwin":
-    dyld_path = os.environ.get("DYLD_LIBRARY_PATH", "")  # save old path
-    archive_path = "/usr/local/opt/libarchive/lib"
-    os.environ["DYLD_LIBRARY_PATH"] = f"{dyld_path}:{archive_path}"
-
-logger = logging.getLogger(__name__)

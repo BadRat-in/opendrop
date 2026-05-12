@@ -1,0 +1,78 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "opendrop"
+version = "0.14.0"
+description = "An open Apple AirDrop implementation with GUI (fork of seemoo-lab/opendrop)"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Milan Stute", email = "mstute@seemoo.tu-darmstadt.de" },
+    { name = "Alexander Heinrich" },
+]
+maintainers = [
+    { name = "Ravindra K.", email = "ravindra@rkinnovate.com" },
+]
+keywords = ["airdrop", "awdl", "owl", "wifi", "filesharing"]
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: System :: Networking",
+]
+dependencies = [
+    "Pillow>=10.0",
+    "fleep",
+    "ifaddr",
+    "libarchive-c",
+    "requests",
+    "requests-toolbelt",
+    "zeroconf>=0.24.2",
+]
+
+[project.optional-dependencies]
+gui = ["PyQt6"]
+dev = ["black", "flake8", "flake8-bugbear", "isort", "pylint", "pytest", "hatchling"]
+
+[project.scripts]
+opendrop = "opendrop.cli:main"
+opendrop-gui = "opendrop.gui.main:main"
+
+[project.urls]
+Homepage = "https://owlink.org"
+Upstream = "https://github.com/seemoo-lab/opendrop"
+Documentation = "https://github.com/seemoo-lab/opendrop"
+Repository = "https://github.com/YOURUSERNAME/opendrop"
+
+[tool.hatch.build.targets.wheel]
+packages = ["opendrop"]
+
+[tool.hatch.build]
+include = [
+    "opendrop/**/*.py",
+    "opendrop/certs/*.pem",
+    "opendrop/gui/resources/*.png",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+multi_line_mode = 3
+include_trailing_comma = true
+
+[tool.pylint]
+max-line-length = 88

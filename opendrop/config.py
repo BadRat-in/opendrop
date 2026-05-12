@@ -24,7 +24,14 @@ import socket
 import ssl
 import subprocess
 
-from pkg_resources import resource_filename
+try:
+    from importlib.resources import files
+    def resource_filename(package, resource):
+        # This emulates the old pkg_resources behavior using modern importlib
+        return str(files(package).joinpath(resource))
+except ImportError:
+    # Fallback for older python versions
+    from pkg_resources import resource_filename
 
 logger = logging.getLogger(__name__)
 

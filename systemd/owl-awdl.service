@@ -1,0 +1,39 @@
+[Unit]
+Description=OWL AWDL Interface (OpenDrop)
+Documentation=https://owlink.org
+After=network.target
+Before=network-online.target
+
+[Service]
+Type=forking
+RemainAfterExit=no
+User=root
+Group=root
+
+# Create a virtual monitor interface on the WiFi adapter
+ExecStartPre=/usr/sbin/iw dev wlo1 interface add mon0 type monitor
+ExecStartPre=/usr/sbin/ip link set mon0 up
+ExecStartPre=/usr/bin/sleep 1
+
+# Start the OWL daemon on the monitor interface
+# OWL will automatically create the awdl0 TUN interface
+ExecStart=/usr/local/bin/owl -i mon0
+
+# Clean up on stop: remove the virtual monitor interface
+# This also removes awdl0 since it's tied to OWL's lifecycle
+ExecStopPost=/usr/sbin/iw dev mon0 del
+ExecStopPost=/usr/bin/sleep 1
+
+# Restore WiFi connectivity after OWL stops
+ExecStopPost=/usr/bin/nmcli dev connect wlo1
+
+# Don't restart OWL automatically on failure
+# Users should explicitly start/stop via the GUI or systemctl
+Restart=no
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=owl-awdl
+
+[Install]
+WantedBy=multi-user.target

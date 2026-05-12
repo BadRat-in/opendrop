@@ -1,0 +1,330 @@
+"""
+OpenDrop: an open source AirDrop implementation
+Copyright (C) 2024  Ravindra K. (GUI extension)
+Copyright (C) 2018  Milan Stute
+Copyright (C) 2018  Alexander Heinrich
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+QThread workers for AirDrop operations.
+
+Provides non-blocking Qt threads that wrap the existing AirDropBrowser,
+AirDropClient, and AirDropServer for use in the GUI. All network operations
+run in background threads to keep the UI responsive.
+"""
+
+import logging
+import threading
+from pathlib import Path
+from typing import Dict, Optional, Tuple
+
+from PyQt6.QtCore import QThread, pyqtSignal
+
+from opendrop.client import AirDropBrowser, AirDropClient
+from opendrop.config import AirDropConfig
+from opendrop.server import AirDropServer
+
+logger = logging.getLogger(__name__)
+
+
+class BrowseWorker(QThread):
+    """
+    Background thread for discovering nearby AirDrop devices.
+
+    Uses mDNS (via AirDropBrowser) to discover _airdrop._tcp.local. services
+    and emits signals when devices are found or removed.
+
+    Signals:
+        device_found: Emitted with device info dict when a device is discovered
+        device_removed: Emitted with device ID when a device goes offline
+        error: Emitted with error message if discovery fails
+    """
+
+    device_found = pyqtSignal(dict)
+    device_removed = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, config: AirDropConfig, parent=None):
+        """
+        Initialize the browse worker.
+
+        Args:
+            config: AirDropConfig instance with interface settings
+            parent: Parent QObject
+        """
+        super().__init__(parent)
+        self.config = config
+        self.browser: Optional[AirDropBrowser] = None
+        self._stop_event = threading.Event()
+
+    def run(self) -> None:
+        """
+        Background thread main loop: discover and monitor AirDrop devices.
+
+        Creates an AirDropBrowser and runs it until stop() is called.
+        Emits device_found and device_removed signals as devices appear/disappear.
+        """
+        try:
+            logger.info(f"Starting device discovery on interface {self.config.interface}")
+            self.browser = AirDropBrowser(self.config)
+
+            def on_device_found(info):
+                try:
+                    device_data = self._parse_device_info(info)
+                    logger.debug(f"Device found: {device_data.get('name')}")
+                    self.device_found.emit(device_data)
+                except Exception as e:
+                    logger.warning(f"Error parsing device info: {e}")
+
+            def on_device_removed(info):
+                try:
+                    name = info.name.split(".")[0]
+                    logger.debug(f"Device removed: {name}")
+                    self.device_removed.emit(name)
+                except Exception as e:
+                    logger.warning(f"Error processing device removal: {e}")
+
+            self.browser.start(callback_add=on_device_found, callback_remove=on_device_removed)
+
+            # Keep the thread alive until stop() is called
+            while not self._stop_event.is_set():
+                self._stop_event.wait(0.1)
+
+            logger.info("Device discovery stopped")
+
+        except Exception as e:
+            error_msg = f"Discovery error: {e}"
+            logger.error(error_msg)
+            self.error.emit(error_msg)
+
+        finally:
+            if self.browser:
+                try:
+                    self.browser.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping browser: {e}")
+
+    def _parse_device_info(self, info) -> Dict:
+        """
+        Parse zeroconf ServiceInfo into a device dictionary.
+
+        Args:
+            info: zeroconf.ServiceInfo object
+
+        Returns:
+            Dict with keys: name, address, port, id, flags, model, flags
+        """
+        identifier = info.name.split(".")[0]
+        try:
+            address = info.parsed_addresses()[0]
+        except (IndexError, AttributeError):
+            address = "unknown"
+
+        port = int(info.port) if info.port else 8771
+
+        return {
+            "name": info.server.rstrip(".") if info.server else identifier,
+            "address": str(address),
+            "port": port,
+            "id": identifier,
+            "properties": dict(info.properties) if info.properties else {},
+        }
+
+    def stop(self) -> None:
+        """Stop the discovery thread gracefully."""
+        logger.debug("Stopping BrowseWorker")
+        self._stop_event.set()
+        self.quit()
+        self.wait()
+
+
+class SendWorker(QThread):
+    """
+    Background thread for sending a file to a receiver device.
+
+    Signals:
+        progress: Emitted with percentage (0-100) during upload
+        finished: Emitted with success bool when transfer completes
+        error: Emitted with error message on failure
+    """
+
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(bool)
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        config: AirDropConfig,
+        file_path: str,
+        receiver_info: Dict,
+        parent=None,
+    ):
+        """
+        Initialize the send worker.
+
+        Args:
+            config: AirDropConfig instance
+            file_path: Path to file to send (or URL if is_url=True)
+            receiver_info: Dict with keys 'address', 'port', 'name'
+            parent: Parent QObject
+        """
+        super().__init__(parent)
+        self.config = config
+        self.file_path = file_path
+        self.receiver_info = receiver_info
+
+    def run(self) -> None:
+        """
+        Background thread main loop: send file to receiver.
+
+        Attempts to send file, emitting progress and finished signals.
+        """
+        try:
+            file_path = Path(self.file_path).expanduser()
+
+            if not file_path.exists() and not self.file_path.startswith("http"):
+                raise FileNotFoundError(f"File not found: {self.file_path}")
+
+            logger.info(f"Starting file send to {self.receiver_info.get('name')}")
+
+            # Create client and connect to receiver
+            receiver_addr = (
+                self.receiver_info["address"],
+                self.receiver_info["port"],
+            )
+            client = AirDropClient(self.config, receiver_addr)
+
+            # Send /Discover request
+            logger.debug("Sending /Discover request")
+            self.progress.emit(10)
+            if not client.send_discover():
+                raise RuntimeError("Receiver rejected /Discover")
+
+            # Send /Ask request
+            logger.debug("Sending /Ask request")
+            self.progress.emit(30)
+            if not client.send_ask(self.file_path):
+                raise RuntimeError("Receiver rejected file")
+
+            # Send /Upload request
+            logger.debug("Sending /Upload request")
+            self.progress.emit(50)
+            if not client.send_upload(self.file_path):
+                raise RuntimeError("Upload failed")
+
+            logger.info("File sent successfully")
+            self.progress.emit(100)
+            self.finished.emit(True)
+
+        except Exception as e:
+            error_msg = f"Send failed: {e}"
+            logger.error(error_msg)
+            self.error.emit(error_msg)
+            self.finished.emit(False)
+
+    def stop(self) -> None:
+        """Stop the send operation."""
+        logger.debug("Stopping SendWorker")
+        self.quit()
+        self.wait()
+
+
+class ReceiveWorker(QThread):
+    """
+    Background thread for receiving files from AirDrop senders.
+
+    Registers an mDNS service and accepts incoming file transfers.
+
+    Signals:
+        file_received: Emitted with file path when a file is received
+        error: Emitted with error message on failure
+    """
+
+    file_received = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, config: AirDropConfig, parent=None):
+        """
+        Initialize the receive worker.
+
+        Args:
+            config: AirDropConfig instance
+            parent: Parent QObject
+        """
+        super().__init__(parent)
+        self.config = config
+        self.server: Optional[AirDropServer] = None
+        self._stop_event = threading.Event()
+
+    def run(self) -> None:
+        """
+        Background thread main loop: listen for and accept file transfers.
+
+        Creates an AirDropServer and runs serve_forever() until stop() is called.
+        """
+        try:
+            logger.info(f"Starting AirDrop receiver on interface {self.config.interface}")
+
+            # Change to receive directory before creating server
+            import os
+
+            recv_dir = Path(self.config.airdrop_dir) / "incoming"
+            recv_dir.mkdir(parents=True, exist_ok=True)
+            os.chdir(recv_dir)
+
+            self.server = AirDropServer(self.config)
+
+            # Monkey-patch the server to emit signals on file receive
+            original_handle_upload = self.server.Handler.handle_upload
+
+            def handle_upload_wrapper(handler_self):
+                try:
+                    result = original_handle_upload(handler_self)
+                    # Extract the filename from the request if possible
+                    if hasattr(handler_self, "file_path"):
+                        self.file_received.emit(str(handler_self.file_path))
+                    logger.info("File received successfully")
+                    return result
+                except Exception as e:
+                    logger.error(f"Upload handler error: {e}")
+                    raise
+
+            self.server.Handler.handle_upload = handle_upload_wrapper
+
+            logger.info("Starting server, waiting for incoming files...")
+            self.server.start_server()
+
+        except Exception as e:
+            error_msg = f"Receive error: {e}"
+            logger.error(error_msg)
+            self.error.emit(error_msg)
+
+        finally:
+            if self.server:
+                try:
+                    self.server.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping server: {e}")
+
+    def stop(self) -> None:
+        """Stop receiving and shut down the server."""
+        logger.debug("Stopping ReceiveWorker")
+        if self.server:
+            try:
+                self.server.stop()
+            except Exception:
+                pass
+        self._stop_event.set()
+        self.quit()
+        self.wait()
