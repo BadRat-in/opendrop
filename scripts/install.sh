@@ -47,12 +47,26 @@ install_packages() {
     case "${DISTRO_ID}" in
         debian|ubuntu|parrot|kali|linuxmint|pop|elementary)
             DEBIAN_FRONTEND=noninteractive apt-get update -qq
+            # polkit packaging changed in Debian 13+ / Ubuntu 24.04+:
+            # the transitional `policykit-1` package was removed and
+            # split into `polkitd` (the daemon) and `pkexec` (the CLI).
+            # Older releases still expose policykit-1.
+            #
+            # Use `apt-cache policy` and inspect the Candidate line —
+            # `apt-cache show` returns metadata even for packages with no
+            # installable candidate, so it gives false positives here.
+            local polkit_pkgs="polkitd pkexec"
+            if apt-cache policy policykit-1 2>/dev/null \
+                | grep -q "Candidate: [0-9]"; then
+                polkit_pkgs="policykit-1"
+            fi
+            # shellcheck disable=SC2086  # word-splitting is intentional
             DEBIAN_FRONTEND=noninteractive apt-get install -y \
                 python3 python3-pip python3-venv \
                 libpcap-dev libev-dev libnl-3-dev libnl-genl-3-dev \
                 bluetooth bluez \
                 build-essential cmake git \
-                policykit-1
+                $polkit_pkgs
             ;;
         fedora|rhel|centos|rocky|alma)
             dnf install -y \
