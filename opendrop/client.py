@@ -308,13 +308,17 @@ class HTTPSConnectionAWDL(HTTPSConnection):
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
 
+        # Apply check_hostname to context if provided
+        if check_hostname is not None:
+            context.check_hostname = check_hostname
+
+        # Don't pass check_hostname to parent; it's configured on the context
         super(HTTPSConnectionAWDL, self).__init__(
             host=host,
             port=port,
             timeout=timeout,
             source_address=source_address,
             context=context,
-            check_hostname=check_hostname,
         )
 
         self.interface_name = interface_name
