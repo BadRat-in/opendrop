@@ -49,9 +49,20 @@ class AirDropBrowser:
                     f"Interface {config.interface} does not have an IPv6 address"
                 )
 
+        # Try dual-stack (IPv4+IPv6) for better compatibility
+        # Some systems need both IPv4 and IPv6 for proper mDNS discovery
+        ip_version = IPVersion.All
+        ipv4_addr = AirDropUtil.get_ip_for_interface(config.interface, ipv6=False)
+        if ipv4_addr is None:
+            # Fall back to IPv6-only if no IPv4 available
+            ip_version = IPVersion.V6Only
+            logger.debug(f"No IPv4 found on {config.interface}, using IPv6-only")
+        else:
+            logger.debug(f"Using dual-stack: IPv4={ipv4_addr}, IPv6={self.ip_addr}")
+
         self.zeroconf = Zeroconf(
             interfaces=[str(self.ip_addr)],
-            ip_version=IPVersion.V6Only,
+            ip_version=ip_version,
             apple_p2p=platform.system() == "Darwin",
         )
 

@@ -65,9 +65,21 @@ class AirDropServer:
         self.Handler = AirDropServerHandler
         self.Handler.config = self.config
 
+        # Try dual-stack (IPv4+IPv6) for better compatibility
+        ip_version = IPVersion.All
+        ipv4_addr = AirDropUtil.get_ip_for_interface(self.config.interface, ipv6=False)
+        if ipv4_addr is None:
+            # Fall back to IPv6-only if no IPv4 available
+            ip_version = IPVersion.V6Only
+            logger.debug(f"No IPv4 found on {self.config.interface}, using IPv6-only")
+        else:
+            logger.debug(
+                f"Server using dual-stack: IPv4={ipv4_addr}, IPv6={self.ip_addr}"
+            )
+
         self.zeroconf = Zeroconf(
             interfaces=[str(self.ip_addr)],
-            ip_version=IPVersion.V6Only,
+            ip_version=ip_version,
             apple_p2p=platform.system() == "Darwin",
         )
 
