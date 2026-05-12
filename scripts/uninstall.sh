@@ -85,13 +85,27 @@ remove_legacy_systemd() {
 }
 
 uninstall_python() {
-    # The pip uninstall must run as the user, not root, if pip installed to
-    # --user. To cover both system-wide and user-mode installs, we try both.
-    info "Uninstalling Python package..."
-    if command -v uv >/dev/null 2>&1; then
-        uv pip uninstall --system opendrop 2>/dev/null || true
+    # install.sh places OpenDrop in a dedicated venv at /opt/opendrop and
+    # symlinks the CLI entry points into /usr/local/bin. Reverse both.
+    info "Removing Python install..."
+    local venv=/opt/opendrop
+    if [ -d "${venv}" ]; then
+        rm -rf "${venv}"
+        info "  removed venv: ${venv}"
     fi
-    pip3 uninstall -y opendrop 2>/dev/null || true
+    for cmd in opendrop opendrop-gui opendrop-doctor; do
+        local link="/usr/local/bin/${cmd}"
+        if [ -L "${link}" ] || [ -f "${link}" ]; then
+            rm -f "${link}"
+            info "  removed ${link}"
+        fi
+    done
+
+    # Belt-and-suspenders: clean up any stray pip-installed copy from older
+    # install.sh versions that wrote into system Python.
+    if command -v pip3 >/dev/null 2>&1; then
+        pip3 uninstall -y opendrop >/dev/null 2>&1 || true
+    fi
 }
 
 purge_user_data() {

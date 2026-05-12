@@ -172,7 +172,10 @@ build_owl() {
     install -m 755 "${owl_bin}" /usr/local/bin/owl
     cd /
     rm -rf "${tmp}"
-    info "OWL installed: $(command -v owl)"
+    # `command -v owl` would be empty here under pkexec because the
+    # sanitized PATH doesn't include /usr/local/bin. Report the absolute
+    # path we actually wrote to instead.
+    info "OWL installed: /usr/local/bin/owl"
 }
 
 install_polkit_policy() {
@@ -222,14 +225,41 @@ install_desktop_files() {
 }
 
 install_opendrop_python() {
-    info "Installing OpenDrop Python package..."
-    # Prefer uv if present, fall back to pip3.
-    if command -v uv >/dev/null 2>&1; then
-        (cd "${REPO_ROOT}" && uv pip install --system -e ".[gui]")
-    else
-        pip3 install --break-system-packages -e "${REPO_ROOT}[gui]" 2>/dev/null || \
-            pip3 install -e "${REPO_ROOT}[gui]"
+    # Install into a dedicated venv at /opt/opendrop. This:
+    #   - avoids PEP 668 EXTERNALLY-MANAGED refusal on Debian/Parrot,
+    #   - leaves the system Python untouched,
+    #   - lets us uninstall cleanly with `rm -rf /opt/opendrop`,
+    #   - works identically on Fedora, Arch, openSUSE, Alpine, Void.
+    local venv=/opt/opendrop
+    info "Installing OpenDrop into ${venv}..."
+
+    if ! python3 -m venv --help >/dev/null 2>&1; then
+        err "python3 -m venv unavailable. Install python3-venv (Debian),"
+        err "  python3-virtualenv (Alpine), or python3-full."
+        return 1
     fi
+
+    # Drop a stale venv only if it exists; re-runs should be idempotent.
+    if [ -d "${venv}" ]; then
+        info "  removing previous venv at ${venv}"
+        rm -rf "${venv}"
+    fi
+    python3 -m venv "${venv}"
+    "${venv}/bin/pip" install --upgrade pip >/dev/null
+
+    if ! "${venv}/bin/pip" install -e "${REPO_ROOT}[gui]"; then
+        err "OpenDrop pip install failed."
+        return 1
+    fi
+
+    # Symlink CLI entry points into /usr/local/bin so they're on every
+    # user's PATH without any per-user activation.
+    for cmd in opendrop opendrop-gui opendrop-doctor; do
+        if [ -x "${venv}/bin/${cmd}" ]; then
+            ln -sf "${venv}/bin/${cmd}" "/usr/local/bin/${cmd}"
+            info "  linked /usr/local/bin/${cmd} -> ${venv}/bin/${cmd}"
+        fi
+    done
 }
 
 main() {
