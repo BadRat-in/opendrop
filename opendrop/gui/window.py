@@ -38,6 +38,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QMessageBox,
     QFileDialog,
+    QDialog,
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
@@ -421,7 +422,7 @@ class MainWindow(QWidget):
     def _on_settings(self) -> None:
         """Open settings dialog."""
         dialog = SettingsDialog(self.settings, self)
-        if dialog.exec() == SettingsDialog.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             logger.info("Settings updated")
             # Reload settings for display
             self.info_label.setText(
