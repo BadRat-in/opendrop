@@ -124,39 +124,43 @@ build_owl() {
 
 install_polkit_policy() {
     local policy_dir=/usr/share/polkit-1/actions
-    local policy_file="${policy_dir}/org.opendrop.policy"
+    local src="${REPO_ROOT}/packaging/org.opendrop.policy"
     if [ ! -d "${policy_dir}" ]; then
         warn "polkit actions dir not found, skipping policy install"
         return
     fi
-    info "Installing polkit policy: ${policy_file}"
-    cat >"${policy_file}" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD polkit Policy Configuration 1.0//EN"
- "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
-<policyconfig>
-  <action id="org.opendrop.start-owl">
-    <description>Start the OWL AWDL daemon for OpenDrop</description>
-    <message>OpenDrop needs to start the AWDL interface (awdl0)</message>
-    <defaults>
-      <allow_any>auth_admin_keep</allow_any>
-      <allow_inactive>auth_admin_keep</allow_inactive>
-      <allow_active>auth_admin_keep</allow_active>
-    </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/systemctl</annotate>
-  </action>
-  <action id="org.opendrop.stop-owl">
-    <description>Stop the OWL AWDL daemon</description>
-    <message>OpenDrop needs to stop the AWDL interface</message>
-    <defaults>
-      <allow_any>auth_admin_keep</allow_any>
-      <allow_inactive>auth_admin_keep</allow_inactive>
-      <allow_active>auth_admin_keep</allow_active>
-    </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/systemctl</annotate>
-  </action>
-</policyconfig>
-EOF
+    if [ ! -f "${src}" ]; then
+        warn "polkit policy source not found at ${src}, skipping"
+        return
+    fi
+    info "Installing polkit policy → ${policy_dir}/"
+    install -m 644 "${src}" "${policy_dir}/org.opendrop.policy"
+}
+
+install_desktop_files() {
+    local app_dir=/usr/share/applications
+    local src_dir="${REPO_ROOT}/packaging"
+    if [ ! -d "${app_dir}" ]; then
+        warn "applications dir not found, skipping .desktop install"
+        return
+    fi
+    for f in opendrop.desktop opendrop-doctor.desktop; do
+        if [ -f "${src_dir}/${f}" ]; then
+            install -m 644 "${src_dir}/${f}" "${app_dir}/${f}"
+            info "Installed ${app_dir}/${f}"
+        fi
+    done
+
+    # Icon: we don't ship an SVG yet, but copy a reasonable PNG if present.
+    local icon_dir=/usr/share/icons/hicolor/256x256/apps
+    if [ -f "${REPO_ROOT}/opendrop/gui/resources/icon_active.png" ]; then
+        install -D -m 644 \
+            "${REPO_ROOT}/opendrop/gui/resources/icon_active.png" \
+            "${icon_dir}/opendrop.png"
+        # Refresh the icon cache if available.
+        command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+            gtk-update-icon-cache -f /usr/share/icons/hicolor || true
+    fi
 }
 
 install_opendrop_python() {
@@ -176,6 +180,7 @@ main() {
     install_packages
     build_owl
     install_polkit_policy
+    install_desktop_files
     install_opendrop_python
     info "Done. Run as your user (NOT root):  opendrop-doctor"
     info "If 'opendrop-doctor' reports green, launch the GUI: opendrop-gui"

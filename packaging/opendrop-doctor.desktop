@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=OpenDrop Doctor
+GenericName=OpenDrop Diagnostics
+Comment=Check hardware compatibility for AirDrop
+Exec=sh -c 'opendrop-doctor; read -p "Press Enter to close..." x'
+Icon=opendrop
+Terminal=true
+Categories=Network;Settings;
+NoDisplay=false
+Keywords=opendrop;diagnostic;airdrop;

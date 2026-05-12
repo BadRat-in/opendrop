@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenDrop system-tray application
+Documentation=https://github.com/seemoo-lab/opendrop
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/opendrop-gui
+Restart=on-failure
+RestartSec=5
+# Don't restart if the user quits intentionally.
+SuccessExitStatus=0
+
+[Install]
+WantedBy=graphical-session.target

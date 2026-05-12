@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD polkit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+
+<!--
+  polkit actions for OpenDrop. Installed to
+    /usr/share/polkit-1/actions/org.opendrop.policy
+  by scripts/install.sh.
+
+  Using polkit instead of sudo means the GUI can request privileges with
+  a native dialog instead of a tty password prompt. Once installed, no
+  sudoers entry is needed for the OWL service lifecycle.
+-->
+<policyconfig>
+
+  <vendor>OpenDrop</vendor>
+  <vendor_url>https://github.com/seemoo-lab/opendrop</vendor_url>
+
+  <action id="org.opendrop.manage-owl-service">
+    <description>Manage the OWL AWDL daemon</description>
+    <message>OpenDrop is starting or stopping the AWDL interface (awdl0) required for AirDrop with Apple devices.</message>
+    <defaults>
+      <allow_any>auth_admin_keep</allow_any>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/systemctl</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+
+</policyconfig>

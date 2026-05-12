@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=OpenDrop
+GenericName=AirDrop for Linux
+Comment=Send and receive files with Apple AirDrop devices
+Exec=opendrop-gui
+Icon=opendrop
+Terminal=false
+Categories=Network;FileTransfer;
+Keywords=airdrop;wifi;share;transfer;apple;
+StartupNotify=true
+StartupWMClass=OpenDrop
+X-GNOME-UsesNotifications=true
