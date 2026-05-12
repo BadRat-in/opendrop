@@ -74,8 +74,19 @@ else
     done
 fi
 
+# Fetch the fork first so --force-with-lease has a remote-tracking baseline
+# to compare against. Without this, git refuses with "stale info" because it
+# doesn't know the current remote state.
+info "Fetching ${FORK_URL}..."
+if ! git fetch fork 2>&1 | grep -v "^From"; then
+    warn "fetch from fork failed; will attempt push without lease check"
+    push_cmd=(git push --force fork master)
+else
+    push_cmd=(git push --force-with-lease=master fork master)
+fi
+
 info "Pushing to ${FORK_URL} (master)..."
-if ! git push --force-with-lease fork master; then
+if ! "${push_cmd[@]}"; then
     err "Push failed."
     err ""
     err "Common fixes:"
