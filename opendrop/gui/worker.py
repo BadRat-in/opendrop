@@ -76,7 +76,9 @@ class BrowseWorker(QThread):
         Emits device_found and device_removed signals as devices appear/disappear.
         """
         try:
-            logger.info(f"Starting device discovery on interface {self.config.interface}")
+            logger.info(
+                f"Starting device discovery on interface {self.config.interface}"
+            )
             self.browser = AirDropBrowser(self.config)
 
             def on_device_found(info):
@@ -98,7 +100,9 @@ class BrowseWorker(QThread):
                 except Exception as e:
                     logger.warning(f"Error processing device removal: {e}")
 
-            self.browser.start(callback_add=on_device_found, callback_remove=on_device_removed)
+            self.browser.start(
+                callback_add=on_device_found, callback_remove=on_device_removed
+            )
 
             # Keep the thread alive until stop() is called
             while not self._stop_event.is_set():
@@ -247,13 +251,15 @@ class ReceiveWorker(QThread):
     """
     Background thread for receiving files from AirDrop senders.
 
-    Registers an mDNS service and accepts incoming file transfers.
+    Registers an mDNS service and accepts incoming file transfers with user confirmation.
 
     Signals:
+        file_request: Emitted with file details dict when an /Ask request arrives
         file_received: Emitted with file path when a file is received
         error: Emitted with error message on failure
     """
 
+    file_request = pyqtSignal(dict)
     file_received = pyqtSignal(str)
     error = pyqtSignal(str)
 
@@ -269,6 +275,9 @@ class ReceiveWorker(QThread):
         self.config = config
         self.server: Optional[AirDropServer] = None
         self._stop_event = threading.Event()
+        self._pending_request = None
+        self._request_approved = threading.Event()
+        self._request_lock = threading.Lock()
 
     def run(self) -> None:
         """
@@ -277,7 +286,9 @@ class ReceiveWorker(QThread):
         Creates an AirDropServer and runs serve_forever() until stop() is called.
         """
         try:
-            logger.info(f"Starting AirDrop receiver on interface {self.config.interface}")
+            logger.info(
+                f"Starting AirDrop receiver on interface {self.config.interface}"
+            )
 
             # Change to receive directory before creating server
             import os
@@ -287,6 +298,90 @@ class ReceiveWorker(QThread):
             os.chdir(recv_dir)
 
             self.server = AirDropServer(self.config)
+
+            # Monkey-patch to handle /Ask requests with user confirmation
+            original_handle_ask = self.server.Handler.handle_ask
+
+            def handle_ask_wrapper(handler_self):
+                try:
+                    import plistlib
+
+                    content_length = int(handler_self.headers["Content-Length"])
+                    post_data = handler_self.rfile.read(content_length)
+
+                    # Parse the request to get file information
+                    try:
+                        ask_request = plistlib.loads(post_data)
+                    except Exception:
+                        ask_request = {}
+
+                    # Extract file details from the request
+                    files = ask_request.get("Files", [])
+                    sender_name = ask_request.get("SenderComputerName", "Unknown")
+                    file_names = [f.get("FileName", "Unknown") for f in files]
+
+                    # Create request info to send to GUI
+                    request_info = {
+                        "sender": sender_name,
+                        "files": file_names,
+                        "file_count": len(files),
+                    }
+
+                    # Emit signal and wait for user response
+                    with self._request_lock:
+                        self._pending_request = request_info
+                        self._request_approved.clear()
+
+                    logger.info(
+                        f"File request from {sender_name}: {', '.join(file_names)}"
+                    )
+                    self.file_request.emit(request_info)
+
+                    # Wait for user response (with timeout)
+                    approved = self._request_approved.wait(
+                        timeout=60
+                    )  # 60 second timeout
+                    if not approved:
+                        logger.warning("File request timed out")
+                        approved = False
+
+                    with self._request_lock:
+                        if self._pending_request:
+                            approved = self._pending_request.get("approved", False)
+                        self._pending_request = None
+
+                    # Send response to sender
+                    ask_response = {
+                        "ReceiverModelName": handler_self.config.computer_model,
+                        "ReceiverComputerName": handler_self.config.computer_name,
+                    }
+
+                    if not approved:
+                        # Send rejection response
+                        logger.info(f"File request rejected: {sender_name}")
+                        handler_self.send_response(400)
+                        handler_self.send_header("Content-Length", 0)
+                        handler_self.end_headers()
+                        return
+
+                    # Send approval response
+                    ask_resp_binary = plistlib.dumps(
+                        ask_response, fmt=plistlib.FMT_BINARY
+                    )
+                    handler_self.send_response(200)
+                    handler_self.send_header("Content-Length", len(ask_resp_binary))
+                    handler_self.end_headers()
+                    handler_self.wfile.write(ask_resp_binary)
+                    logger.info(f"File request approved: {sender_name}")
+
+                except Exception as e:
+                    logger.error(f"Ask handler error: {e}")
+                    try:
+                        handler_self.send_response(500)
+                        handler_self.send_header("Content-Length", 0)
+                        handler_self.end_headers()
+                    except Exception:
+                        pass
 
             # Monkey-patch the server to emit signals on file receive
             original_handle_upload = self.server.Handler.handle_upload
@@ -303,6 +398,7 @@ class ReceiveWorker(QThread):
                     logger.error(f"Upload handler error: {e}")
                     raise
 
+            self.server.Handler.handle_ask = handle_ask_wrapper
             self.server.Handler.handle_upload = handle_upload_wrapper
 
             # Register mDNS service and start server
@@ -321,6 +417,18 @@ class ReceiveWorker(QThread):
                     self.server.stop()
                 except Exception as e:
                     logger.error(f"Error stopping server: {e}")
+
+    def approve_file_request(self, approved: bool) -> None:
+        """
+        Called by GUI to approve or reject a file request.
+
+        Args:
+            approved: True to accept, False to reject
+        """
+        with self._request_lock:
+            if self._pending_request:
+                self._pending_request["approved"] = approved
+                self._request_approved.set()
 
     def stop(self) -> None:
         """Stop receiving and shut down the server."""

@@ -439,6 +439,7 @@ class MainWindow(QWidget):
                 )
 
                 self.receive_worker = ReceiveWorker(config)
+                self.receive_worker.file_request.connect(self._on_file_request)
                 self.receive_worker.file_received.connect(self._on_file_received)
                 self.receive_worker.error.connect(self._on_receive_error)
                 self.receive_worker.start()
@@ -457,6 +458,34 @@ class MainWindow(QWidget):
                 self.receive_worker = None
             self.settings.receiving_enabled = False
             self.settings.save()
+
+    def _on_file_request(self, request_info: Dict) -> None:
+        """Handle incoming AirDrop file request."""
+        sender = request_info.get("sender", "Unknown Device")
+        files = request_info.get("files", [])
+        file_count = request_info.get("file_count", 0)
+
+        # Create a readable file list
+        if len(files) == 1:
+            file_text = files[0]
+        elif len(files) <= 3:
+            file_text = ", ".join(files)
+        else:
+            file_text = ", ".join(files[:3]) + f"... (+{len(files) - 3} more)"
+
+        # Show confirmation dialog
+        result = QMessageBox.question(
+            self,
+            "Incoming AirDrop",
+            f"Accept {file_count} file(s) from {sender}?\n\n{file_text}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+
+        approved = result == QMessageBox.StandardButton.Yes
+        logger.info(f"File request {'approved' if approved else 'rejected'}: {sender}")
+
+        if self.receive_worker:
+            self.receive_worker.approve_file_request(approved)
 
     def _on_file_received(self, file_path: str) -> None:
         """File has been received."""
