@@ -172,7 +172,28 @@ cp "$WRAPPER_SRC" "$WRAPPER_DST"
 chmod 755 "$WRAPPER_DST"
 log_success "Installed GUI wrapper to $WRAPPER_DST ✓"
 
-# Step 9: Create desktop launcher (if GUI is used)
+# Step 9: Install helper scripts
+log_info "Installing helper scripts..."
+
+# Install WiFi reconnection helper
+WIFI_HELPER_SRC="${PROJECT_ROOT}/scripts/wifi-reconnect.sh"
+WIFI_HELPER_DST="/usr/local/bin/wifi-reconnect"
+if [[ -f "$WIFI_HELPER_SRC" ]]; then
+    cp "$WIFI_HELPER_SRC" "$WIFI_HELPER_DST"
+    chmod 755 "$WIFI_HELPER_DST"
+    log_success "Installed WiFi reconnection helper to $WIFI_HELPER_DST ✓"
+fi
+
+# Install OWL debug script
+DEBUG_HELPER_SRC="${PROJECT_ROOT}/scripts/debug-owl.sh"
+DEBUG_HELPER_DST="/usr/local/bin/owl-debug"
+if [[ -f "$DEBUG_HELPER_SRC" ]]; then
+    cp "$DEBUG_HELPER_SRC" "$DEBUG_HELPER_DST"
+    chmod 755 "$DEBUG_HELPER_DST"
+    log_success "Installed OWL debug tool to $DEBUG_HELPER_DST ✓"
+fi
+
+# Step 10: Create desktop launcher (if GUI is used)
 log_info "Setting up desktop launcher..."
 DESKTOP_FILE="/usr/share/applications/opendrop-gui.desktop"
 
@@ -195,13 +216,25 @@ EOF
 chmod 644 "$DESKTOP_FILE"
 log_success "Created desktop launcher to $DESKTOP_FILE ✓"
 
-# Step 10: Summary and next steps
+# Step 11: Summary and next steps
 echo ""
 echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗"
 echo "║                   Setup Complete!                                ║"
 echo "╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 log_success "OWL AWDL integration is now ready!"
+echo ""
+echo "Available commands:"
+echo ""
+echo "• opendrop-gui                    # Launch GUI"
+echo "• opendrop find                   # Discover devices"
+echo "• opendrop send -r <device> ...   # Send files"
+echo "• opendrop receive                # Receive files"
+echo ""
+echo "Helper tools:"
+echo ""
+echo "• wifi-reconnect                  # Manually reconnect WiFi after OWL stops"
+echo "• owl-debug                       # Debug OWL startup issues"
 echo ""
 echo "Now you can use OpenDrop in three ways:"
 echo ""
