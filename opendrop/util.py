@@ -127,10 +127,15 @@ class AirDropUtil:
     @staticmethod
     def get_ip_for_interface(interface_name, ipv6=False):
         """
-        Get the ip address in IPv4 or IPv6 for a specific network interface
+        Get the IP address (IPv4 or IPv6) for a specific network interface.
 
-        :param str interface_name: declares the network interface name for which the ip should be accessed
-        :param bool ipv6: Boolean indicating if the ipv6 address should be retrieved
+        For IPv6 link-local addresses (fe80::/10) the returned IPv6Address
+        includes the scope_id, so str(addr) yields e.g. ``fe80::1%wlo1`` —
+        important for zeroconf and socket binding to know which interface
+        the link-local address belongs to.
+
+        :param str interface_name: network interface name
+        :param bool ipv6: True for IPv6, False for IPv4
         :return: IPv4Address or IPv6Address object or None
         """
 
@@ -146,9 +151,21 @@ class AirDropUtil:
 
         for ip in interface.ips:
             if ip.is_IPv6 and ipv6:
-                return ipaddress.IPv6Address(
-                    ip.ip[0]
-                )  # first of (ip, flowinfo, scope_id) tuple
+                # ip.ip is a (address, flowinfo, scope_id) tuple for IPv6
+                addr_str = ip.ip[0]
+                # Attach the interface name as a zone ID for link-local addrs
+                # so that the address is unambiguous (Python 3.9+ supports
+                # IPv6Address("fe80::1%eth0")). Skip for global/loopback.
+                try:
+                    addr = ipaddress.IPv6Address(addr_str)
+                except ValueError:
+                    continue
+                if addr.is_link_local and "%" not in addr_str:
+                    try:
+                        return ipaddress.IPv6Address(f"{addr_str}%{interface_name}")
+                    except ValueError:
+                        return addr
+                return addr
             if ip.is_IPv4 and not ipv6:
                 return ipaddress.IPv4Address(ip.ip)
 

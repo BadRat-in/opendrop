@@ -290,14 +290,14 @@ class ReceiveWorker(QThread):
                 f"Starting AirDrop receiver on interface {self.config.interface}"
             )
 
-            # Change to receive directory before creating server
-            import os
-
             recv_dir = Path(self.config.airdrop_dir) / "incoming"
             recv_dir.mkdir(parents=True, exist_ok=True)
-            os.chdir(recv_dir)
 
             self.server = AirDropServer(self.config)
+            # Tell the request handler where to deposit uploaded files.
+            # The handler uses a process-wide lock to serialize chdir-based
+            # extraction, so this stays thread-safe.
+            self.server.Handler.receive_dir = str(recv_dir)
 
             # Monkey-patch to handle /Ask requests with user confirmation
             original_handle_ask = self.server.Handler.handle_ask

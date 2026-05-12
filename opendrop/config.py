@@ -26,9 +26,11 @@ import subprocess
 
 try:
     from importlib.resources import files
+
     def resource_filename(package, resource):
         # This emulates the old pkg_resources behavior using modern importlib
         return str(files(package).joinpath(resource))
+
 except ImportError:
     # Fallback for older python versions
     from pkg_resources import resource_filename
@@ -95,7 +97,13 @@ class AirDropConfig:
         self.debug_dir = os.path.join(self.airdrop_dir, "debug")
 
         if interface is None:
-            interface = "awdl0"
+            # Prefer awdl0 (OWL running), then default-route interface, then any
+            # interface with an IPv6 address. Falls back to "awdl0" so the
+            # caller sees a familiar error message if nothing is suitable.
+            from .network import find_interface_with_ipv6
+
+            interface = find_interface_with_ipv6() or "awdl0"
+            logger.debug(f"Auto-selected interface: {interface}")
         self.interface = interface
 
         if email is None:

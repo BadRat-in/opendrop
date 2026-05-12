@@ -20,10 +20,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import io
 import json
 import logging
+import os
 import platform
 import plistlib
 import socket
+import threading
 import time
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import libarchive
@@ -35,6 +38,25 @@ from .util import AirDropUtil
 
 logger = logging.getLogger(__name__)
 
+# Serializes concurrent uploads so they don't fight over process-wide cwd.
+# Uploads are expected to be infrequent, so serialization is acceptable.
+_UPLOAD_LOCK = threading.Lock()
+
+
+@contextmanager
+def _chdir(path: str):
+    """Temporarily chdir into `path`; restore cwd on exit."""
+    prev = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        try:
+            os.chdir(prev)
+        except OSError:
+            # If the previous cwd was removed (rare), fall back to home
+            os.chdir(os.path.expanduser("~"))
+
 
 class AirDropServer:
     """
@@ -44,8 +66,12 @@ class AirDropServer:
     def __init__(self, config):
         self.config = config
 
+        # Track our own bound port locally rather than mutating config.port —
+        # other components hold a reference to the same AirDropConfig.
+        self.port = self.config.port
+
         # Use IPv6
-        self.serveraddress = ("::", self.config.port)
+        self.serveraddress = ("::", self.port)
         self.ServerClass = HTTPServerV6
         self.ServerClass.allow_reuse_address = False
 
@@ -77,6 +103,8 @@ class AirDropServer:
                 f"Server using dual-stack: IPv4={ipv4_addr}, IPv6={self.ip_addr}"
             )
 
+        # Zeroconf expects IP address strings for interfaces, not interface
+        # names. For link-local IPv6, the address carries a "%iface" zone id.
         self.zeroconf = Zeroconf(
             interfaces=[str(self.ip_addr)],
             ip_version=ip_version,
@@ -89,33 +117,44 @@ class AirDropServer:
     def _init_service(self):
         properties = self.get_properties()
         server = self.config.host_name + ".local."
-        # Use computer_name for display in Bonjour/mDNS, service_id is in properties
-        service_name = self.config.computer_name + "._airdrop._tcp.local."
+        # AirDrop uses the service_id (random hex) as the mDNS service name,
+        # with the friendly computer name carried in the TXT properties.
+        service_name = self.config.service_id + "._airdrop._tcp.local."
         info = ServiceInfo(
             "_airdrop._tcp.local.",
             service_name,
-            port=self.config.port,
+            port=self.port,
             properties=properties,
             server=server,
             addresses=[self.ip_addr.packed],
-            interface_index=None,
         )
         return info
 
     def start_service(self):
         logger.info(
-            f"Announcing service: host {self.config.host_name}, address {self.ip_addr}, port {self.config.port}"
+            f"Announcing service: host {self.config.host_name}, "
+            f"address {self.ip_addr}, port {self.port}"
         )
         self.zeroconf.register_service(self.service_info)
 
     def _init_server(self):
-        try:
-            httpd = self.ServerClass(self.serveraddress, self.Handler)
-        except OSError:
-            # Address in use. Change port
-            self.config.port = self.config.port + 1
-            self.serveraddress = (self.serveraddress[0], self.config.port)
-            httpd = self.ServerClass(self.serveraddress, self.Handler)
+        # Try ports in a range starting at the configured port. Don't mutate
+        # config.port — store the bound port on self instead.
+        max_attempts = 10
+        last_error = None
+        for attempt in range(max_attempts):
+            try:
+                httpd = self.ServerClass(self.serveraddress, self.Handler)
+                break
+            except OSError as e:
+                last_error = e
+                self.port += 1
+                self.serveraddress = (self.serveraddress[0], self.port)
+        else:
+            raise RuntimeError(
+                f"Could not bind any port in range "
+                f"{self.config.port}-{self.config.port + max_attempts}: {last_error}"
+            )
 
         # Adapt socket for awdl0
         if self.config.interface == "awdl0" and platform.system() == "Darwin":
@@ -146,11 +185,17 @@ class HTTPServerV6(HTTPServer):
 
 class AirDropServerHandler(BaseHTTPRequestHandler):
     """
-    Server which responds to AirDrop HTTP POST requests
+    Server which responds to AirDrop HTTP POST requests.
+
+    Class attributes (set by AirDropServer before the server starts):
+        config: AirDropConfig instance with cert/identity info.
+        receive_dir: Absolute path where uploaded files should land. If None,
+                     falls back to the process cwd at request time (legacy).
     """
 
     protocol_version = "HTTP/1.1"
     config = None
+    receive_dir = None
 
     def _set_response(self, content_length):
         """
@@ -308,6 +353,9 @@ class AirDropServerHandler(BaseHTTPRequestHandler):
         def extract_stream(stream, flags=0):
             """
             Extracts an archive from memory into the current directory.
+
+            libarchive's extract_entries always writes to cwd, so the caller
+            is responsible for chdir-ing first (under the upload lock).
             """
 
             with libarchive.read.stream_reader(stream) as archive:
@@ -316,12 +364,21 @@ class AirDropServerHandler(BaseHTTPRequestHandler):
         logger.info("Receiving file(s) ...")
         start = time.time()
         reader = HTTPChunkedReader(self.rfile)
-        extract_stream(reader)
+
+        # libarchive extracts to cwd; serialize uploads and chdir into the
+        # configured receive directory rather than mutating cwd globally.
+        target_dir = self.receive_dir or os.getcwd()
+        os.makedirs(target_dir, exist_ok=True)
+        with _UPLOAD_LOCK:
+            with _chdir(target_dir):
+                extract_stream(reader)
 
         transferred = reader.total / 1024.0 / 1024.0
-        speed = transferred / (time.time() - start)
+        elapsed = max(time.time() - start, 1e-6)
+        speed = transferred / elapsed
         logger.info(
-            f"File(s) received (size {transferred:.02f} MB, speed {speed:.02f} MB/s)"
+            f"File(s) received into {target_dir} "
+            f"(size {transferred:.02f} MB, speed {speed:.02f} MB/s)"
         )
 
         self.send_response(200)

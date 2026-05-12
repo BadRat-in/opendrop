@@ -60,6 +60,8 @@ class AirDropBrowser:
         else:
             logger.debug(f"Using dual-stack: IPv4={ipv4_addr}, IPv6={self.ip_addr}")
 
+        # Zeroconf expects IP address strings for interfaces, not interface
+        # names. For link-local IPv6, the address carries a "%iface" zone id.
         self.zeroconf = Zeroconf(
             interfaces=[str(self.ip_addr)],
             ip_version=ip_version,
@@ -87,6 +89,14 @@ class AirDropBrowser:
 
     def add_service(self, zeroconf, service_type, name):
         info = zeroconf.get_service_info(service_type, name)
+        if info is None:
+            logger.debug(f"Add service {name}: no info available")
+            return
+
+        if self._is_self(info):
+            logger.debug(f"Add service {name}: skipping self-announcement")
+            return
+
         logger.debug(f"Add service {name}")
         if self.callback_add is not None:
             self.callback_add(info)
@@ -108,16 +118,45 @@ class AirDropBrowser:
 
     def update_service(self, zeroconf, service_type, name):
         """
-        Called when a service is updated (e.g., address or properties changed).
-        Re-emit as a device found event to refresh the device info without removing it.
+        Called when a service updates its TXT record / address.
+
+        We re-emit as `add` so the GUI can refresh its cached device info.
+        The GUI is expected to deduplicate by service id.
         """
         try:
             info = zeroconf.get_service_info(service_type, name)
-            logger.debug(f"Update service {name}")
-            if self.callback_add is not None and info is not None:
-                self.callback_add(info)
         except Exception as e:
             logger.debug(f"Error updating service {name}: {e}")
+            return
+
+        if info is None:
+            return
+
+        if self._is_self(info):
+            logger.debug(f"Update service {name}: skipping self-announcement")
+            return
+
+        logger.debug(f"Update service {name}")
+        if self.callback_add is not None:
+            self.callback_add(info)
+
+    def _is_self(self, info) -> bool:
+        """
+        Return True if a discovered service belongs to this host.
+
+        Compares the service's advertised addresses against our local interface
+        addresses. Filters out self-announcements that come back through mDNS.
+        """
+        from .network import is_local_address
+
+        try:
+            addresses = info.parsed_addresses() if info else []
+        except Exception:
+            addresses = []
+        for addr in addresses:
+            if is_local_address(addr):
+                return True
+        return False
 
 
 class AirDropClient:
@@ -270,61 +309,61 @@ class AirDropClient:
         return headers
 
 
+_DEFAULT_TIMEOUT = object()  # Sentinel for "use socket default at call time"
+
+
 class HTTPSConnectionAWDL(HTTPSConnection):
     """
     Binds HTTPSConnection to a specific network interface for IPv6 with zone IDs.
 
-    Supports modern SSL context-based initialization while maintaining backward
-    compatibility with deprecated key_file/cert_file parameters.
+    Modern Python compatible: configures TLS via context object, not deprecated
+    key_file/cert_file keyword args.
     """
 
     def __init__(
         self,
         host,
         port=None,
-        timeout=socket.getdefaulttimeout(),
+        timeout=_DEFAULT_TIMEOUT,
         source_address=None,
         *,
         context=None,
         check_hostname=None,
         interface_name=None,
-        # Deprecated parameters for backward compatibility
+        # Deprecated, kept only for ABI compatibility with old callers.
         key_file=None,
         cert_file=None,
     ):
-        # Bind interface to IPv6 address with zone ID if needed
-        if interface_name is not None:
-            if "%" not in host:
-                try:
-                    if isinstance(ipaddress.ip_address(host), ipaddress.IPv6Address):
-                        host = host + "%" + interface_name
-                except ValueError:
-                    pass  # Not an IP address, skip zone binding
+        import ssl
 
-        # Create SSL context from deprecated key_file/cert_file if context not provided
-        if context is None and (key_file is not None or cert_file is not None):
-            import ssl
+        # Resolve timeout at call time, not import time, so callers can change
+        # the default before opening a connection.
+        if timeout is _DEFAULT_TIMEOUT:
+            timeout = socket.getdefaulttimeout()
 
+        # Bind interface to link-local IPv6 address with zone ID if needed
+        if interface_name is not None and "%" not in host:
+            try:
+                if isinstance(ipaddress.ip_address(host), ipaddress.IPv6Address):
+                    host = host + "%" + interface_name
+            except ValueError:
+                # Not an IP address (likely a hostname) — skip zone binding.
+                pass
+
+        # Build a permissive context if none was supplied. AirDrop uses
+        # self-signed certs by design, so we don't verify hostname or chain.
+        if context is None:
             context = ssl.create_default_context()
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
             if cert_file:
                 context.load_cert_chain(cert_file, keyfile=key_file)
 
-        # Ensure we have a context for HTTPS
-        if context is None:
-            import ssl
-
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-
-        # Apply check_hostname to context if provided
+        # Apply check_hostname override on the context (not via __init__)
         if check_hostname is not None:
             context.check_hostname = check_hostname
 
-        # Don't pass check_hostname to parent; it's configured on the context
-        super(HTTPSConnectionAWDL, self).__init__(
+        super().__init__(
             host=host,
             port=port,
             timeout=timeout,
