@@ -12,15 +12,20 @@
 # Safe to re-run — already-applied patches are skipped via `git am --skip`.
 #
 # Usage:
-#   bash scripts/setup-forks.sh            # uses default remotes
-#   FORK_OWNER=otheruser bash scripts/...  # override the fork owner
+#   bash scripts/setup-forks.sh                          # SSH via github.com
+#   FORK_SSH_HOST=badrat.github.com bash scripts/...     # SSH host alias
+#   FORK_URL=https://github.com/BadRat-in/owl.git bash scripts/...  # HTTPS
+#   FORK_OWNER=otheruser FORK_REPO=owl-fork bash scripts/...        # custom
 
 set -euo pipefail
 
 FORK_OWNER="${FORK_OWNER:-BadRat-in}"
 FORK_REPO="${FORK_REPO:-owl}"
+# SSH host alias — change this if you have a per-account host in ~/.ssh/config
+# (e.g. `Host badrat.github.com` with a specific IdentityFile).
+FORK_SSH_HOST="${FORK_SSH_HOST:-github.com}"
 UPSTREAM_URL="https://github.com/seemoo-lab/owl.git"
-FORK_URL="git@github.com:${FORK_OWNER}/${FORK_REPO}.git"
+FORK_URL="${FORK_URL:-git@${FORK_SSH_HOST}:${FORK_OWNER}/${FORK_REPO}.git}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PATCH_DIR="${REPO_ROOT}/patches/owl"
@@ -71,10 +76,16 @@ fi
 
 info "Pushing to ${FORK_URL} (master)..."
 if ! git push --force-with-lease fork master; then
-    err "Push failed. Make sure:"
-    err "  1. You've forked seemoo-lab/owl on GitHub to ${FORK_OWNER}/${FORK_REPO}"
-    err "  2. Your SSH key is registered with GitHub (or change FORK_URL to HTTPS)"
-    err "  3. ${FORK_URL} is reachable"
+    err "Push failed."
+    err ""
+    err "Common fixes:"
+    err "  - Use a custom SSH host alias from ~/.ssh/config:"
+    err "      FORK_SSH_HOST=badrat.github.com bash scripts/setup-forks.sh"
+    err "  - Use HTTPS instead of SSH:"
+    err "      FORK_URL=https://github.com/${FORK_OWNER}/${FORK_REPO}.git \\"
+    err "        bash scripts/setup-forks.sh"
+    err "  - Make sure ${FORK_OWNER}/${FORK_REPO} exists on GitHub:"
+    err "      https://github.com/${FORK_OWNER}/${FORK_REPO}"
     exit 3
 fi
 
