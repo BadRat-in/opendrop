@@ -79,41 +79,41 @@ class OWLManager(QObject):
 
     def check_hardware_capability(self) -> bool:
         """
-        Check if the WiFi hardware supports concurrent monitor+managed mode.
+        Check if the Wi-Fi hardware supports concurrent monitor+managed mode.
 
-        This prevents WiFi disruption when OWL starts. If the hardware doesn't
-        support concurrent mode, WiFi will be briefly interrupted.
+        Delegates to opendrop.hardware which parses iw phy output for every
+        Wi-Fi adapter on the system and consults known-bad/good chipset
+        tables. Returns True only if the *best* adapter advertises a
+        concurrent interface combination — meaning OWL can run without
+        kicking the user off Wi-Fi.
 
         Returns:
-            True if concurrent mode is supported (no WiFi disruption),
-            False if WiFi will be interrupted during OWL operation
+            True if concurrent mode is supported (no Wi-Fi disruption),
+            False otherwise (OWL may not start or will tear down Wi-Fi).
         """
-        try:
-            # Parse iw phy output to check for simultaneous mode capability
-            result = subprocess.run(
-                ["iw", "phy", "phy0", "info"],
-                capture_output=True,
-                text=True,
-                timeout=5,
+        from opendrop.hardware import detect
+
+        report = detect()
+        best = report.best_adapter
+        if best is None:
+            logger.warning("No Wi-Fi adapter detected")
+            self._supports_concurrent_mode = False
+            return False
+
+        if best.supports_concurrent_monitor:
+            logger.info(
+                f"Adapter {best.interface} ({best.chipset!r}) supports concurrent "
+                f"monitor+managed mode — OWL should run without disrupting Wi-Fi"
             )
+            self._supports_concurrent_mode = True
+            return True
 
-            if result.returncode == 0:
-                output = result.stdout
-                # Check if "managed" and "monitor" appear in the same
-                # valid interface combinations section
-                if "managed" in output and "monitor" in output:
-                    # Simple heuristic: if both are mentioned, might support it
-                    # A proper check would parse the interface combinations more carefully
-                    logger.debug("Hardware may support concurrent monitor+managed mode")
-                    self._supports_concurrent_mode = True
-                    return True
-            else:
-                logger.warning(f"iw phy command failed: {result.stderr}")
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logger.warning(f"Could not check hardware capability: {e}")
-
-        logger.warning("Hardware does not support concurrent monitor+managed mode")
-        logger.warning("WiFi will be interrupted when OWL starts")
+        logger.warning(
+            f"Adapter {best.interface} ({best.chipset!r}) does NOT advertise "
+            "concurrent monitor+managed interface combinations. "
+            "OWL is unlikely to start successfully here. "
+            "See `opendrop-doctor` for hardware recommendations."
+        )
         self._supports_concurrent_mode = False
         return False
 
@@ -132,8 +132,7 @@ class OWLManager(QObject):
         """
         description = f"{'Start' if command == 'start' else 'Stop' if command == 'stop' else 'Check'} OWL AWDL service"
         success, output, error = self._sudo_executor.execute(
-            ["systemctl", command, "owl-awdl.service"],
-            description=description
+            ["systemctl", command, "owl-awdl.service"], description=description
         )
 
         if success:
