@@ -175,15 +175,40 @@ class OWLManager(QObject):
         """
         Start the OWL AWDL daemon via systemd.
 
-        If hardware does not support concurrent monitor+managed mode and
-        warn_on_disruption is True, emits wifi_disruption_warning signal.
-        The caller should handle this and confirm before proceeding.
+        Refuses up-front if the host's Wi-Fi chipset is on the known-bad
+        list (Intel CNVi etc.) — otherwise we'd watch the systemd unit
+        crash-loop with "Operation not supported" every 5 seconds.
 
-        Starts a polling timer to detect when awdl0 is ready.
+        If the chipset is *unknown* but the driver doesn't advertise
+        concurrent monitor+managed and warn_on_disruption is True, emits
+        wifi_disruption_warning so the caller can confirm.
 
         Args:
-            warn_on_disruption: If True, emit warning signal on WiFi disruption risk
+            warn_on_disruption: If True, emit warning signal on WiFi
+                                disruption risk for unknown chipsets.
         """
+        # Hard refuse on chipsets we already know fail this kernel API.
+        from opendrop.hardware import AWDLCompatibility, detect
+
+        report = detect()
+        if report.awdl_compatibility in (
+            AWDLCompatibility.UNLIKELY,
+            AWDLCompatibility.NOT_SUPPORTED,
+        ):
+            best = report.best_adapter
+            chipset = best.chipset if best else "unknown"
+            msg = (
+                f"This Wi-Fi adapter ({chipset!r}) cannot run AWDL. "
+                "OWL will fail every time on it because the driver does not "
+                "support the nl80211 operations OWL needs.\n\n"
+                "Run `opendrop-doctor` for hardware recommendations. "
+                "A USB Wi-Fi adapter with an Atheros AR9271 or Realtek "
+                "RTL8812 chipset is the standard workaround."
+            )
+            logger.error(msg)
+            self.owl_error.emit(msg)
+            return
+
         if not self._wifi_disruption_checked:
             capability = self.check_hardware_capability()
             self._wifi_disruption_checked = True

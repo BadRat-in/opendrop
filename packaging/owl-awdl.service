@@ -2,6 +2,11 @@
 Description=OWL — open Apple Wireless Direct Link daemon
 Documentation=https://github.com/seemoo-lab/owl https://github.com/BadRat-in/owl
 After=network.target
+# Give up after 3 failures in 60s. Without this, hardware that can't
+# enter monitor mode (Intel CNVi, broken kernel modules, etc.) causes
+# the unit to crash-loop forever, spamming the journal.
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 # /etc/default/owl is written by scripts/install.sh and supplies
@@ -17,5 +22,6 @@ RestartSec=5
 # interface; both require CAP_NET_ADMIN / CAP_NET_RAW. We run as root
 # rather than fine-grained caps because OWL still does its own privilege
 # checks against the netlink socket.
+
 [Install]
 WantedBy=multi-user.target
