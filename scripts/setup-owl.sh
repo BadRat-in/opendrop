@@ -158,7 +158,21 @@ if ! visudo -c -f "$SUDOERS_FILE" &> /dev/null; then
     exit 1
 fi
 
-# Step 8: Create desktop launcher (if GUI is used)
+# Step 8: Install GUI wrapper script
+log_info "Installing GUI wrapper script..."
+WRAPPER_SRC="${PROJECT_ROOT}/scripts/opendrop-gui-wrapper.sh"
+WRAPPER_DST="/usr/local/bin/opendrop-gui"
+
+if [[ ! -f "$WRAPPER_SRC" ]]; then
+    log_error "Wrapper script not found at $WRAPPER_SRC"
+    exit 1
+fi
+
+cp "$WRAPPER_SRC" "$WRAPPER_DST"
+chmod 755 "$WRAPPER_DST"
+log_success "Installed GUI wrapper to $WRAPPER_DST ✓"
+
+# Step 9: Create desktop launcher (if GUI is used)
 log_info "Setting up desktop launcher..."
 DESKTOP_FILE="/usr/share/applications/opendrop-gui.desktop"
 
@@ -169,14 +183,19 @@ Type=Application
 Terminal=false
 Name=OpenDrop
 Comment=AirDrop-compatible file sharing for Linux
+Comment[de]=AirDrop-kompatibles Dateifreigabesystem für Linux
 Icon=opendrop
+Exec=/usr/local/bin/opendrop-gui
 Categories=Network;FileTransfer;
+Keywords=airdrop;filesharing;wifi;awdl;
+StartupNotify=false
+NoDisplay=false
 EOF
 
 chmod 644 "$DESKTOP_FILE"
 log_success "Created desktop launcher to $DESKTOP_FILE ✓"
 
-# Step 9: Summary and next steps
+# Step 10: Summary and next steps
 echo ""
 echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗"
 echo "║                   Setup Complete!                                ║"
@@ -184,11 +203,18 @@ echo "╚═══════════════════════�
 echo ""
 log_success "OWL AWDL integration is now ready!"
 echo ""
-echo "Next steps:"
+echo "Now you can use OpenDrop in three ways:"
 echo ""
-echo "1. Start OWL AWDL interface (one of these):"
-echo "   • GUI:  opendrop-gui"
-echo "   • CLI:  sudo systemctl start owl-awdl.service"
+echo "1. Command line (from anywhere):"
+echo "   opendrop-gui                    # Launch GUI"
+echo "   opendrop find                   # Discover devices"
+echo "   opendrop send -r <device> ...   # Send files"
+echo "   opendrop receive                # Receive files"
+echo ""
+echo "2. Application menu:"
+echo "   Look for 'OpenDrop' in your application menu"
+echo ""
+echo "3. Manual OWL control:"
 echo ""
 echo "2. Verify awdl0 interface was created:"
 echo "   ip link show awdl0"
