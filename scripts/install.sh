@@ -128,9 +128,24 @@ build_owl() {
     cd "${tmp}/owl"
     mkdir -p build
     cd build
-    cmake ..
-    make -j"$(nproc)"
-    make install
+
+    # OWL bundles googletest, which fails to compile on GCC 14+ because of
+    # -Werror=maybe-uninitialized. We don't need the tests for an end-user
+    # install, so disable test building and explicitly build only the `owl`
+    # target. The CMakeLists doesn't define BUILD_TESTING, but skipping the
+    # default `all` target and naming `owl` avoids the gtest subdirectory.
+    cmake -DCMAKE_BUILD_TYPE=Release ..
+    if ! make -j"$(nproc)" owl; then
+        err "OWL build failed."
+        cd /
+        rm -rf "${tmp}"
+        return 1
+    fi
+
+    # OWL's `make install` would also try to recurse into the broken gtest
+    # subdir. Install the single binary by hand — that's all `make install`
+    # ends up doing anyway (CMakeLists only installs the `owl` target).
+    install -m 755 owl /usr/local/bin/owl
     cd /
     rm -rf "${tmp}"
     info "OWL installed: $(command -v owl)"
