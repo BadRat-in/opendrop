@@ -48,22 +48,19 @@ if [ -z "${ASKPASS}" ]; then
 fi
 info "Using askpass helper: ${ASKPASS}"
 
-# 1. sudoers: make `sudo -A` use this helper.
-SUDOERS_FILE=/etc/sudoers.d/askpass
-TMP="$(mktemp)"
-cat >"${TMP}" <<EOF
-# Installed by scripts/setup-askpass.sh
-Defaults askpass=${ASKPASS}
-EOF
-if visudo -cf "${TMP}" >/dev/null; then
-    install -m 440 "${TMP}" "${SUDOERS_FILE}"
-    info "Installed ${SUDOERS_FILE}"
-else
-    err "visudo refused our generated file; aborting before damage"
-    rm -f "${TMP}"
-    exit 3
+# 1. /etc/sudo.conf: tell sudo's runtime which helper to use when -A is
+# specified. NOTE: this is NOT in sudoers — askpass is a *sudo runtime*
+# setting, not a *sudo policy* setting. Putting it in /etc/sudoers.d
+# fails on Debian/Parrot with "unknown defaults entry 'askpass'".
+SUDO_CONF=/etc/sudo.conf
+# Strip any prior askpass line so re-runs don't accumulate duplicates,
+# then append a fresh one.
+if [ -f "${SUDO_CONF}" ]; then
+    sed -i '/^Path[[:space:]]\+askpass[[:space:]]/d' "${SUDO_CONF}"
 fi
-rm -f "${TMP}"
+echo "Path askpass ${ASKPASS}" >> "${SUDO_CONF}"
+chmod 644 "${SUDO_CONF}"
+info "Wrote askpass path to ${SUDO_CONF}"
 
 # 2. /etc/environment: export SUDO_ASKPASS for every login session so the
 # `-A` flag is the only thing the caller has to remember. Replace any

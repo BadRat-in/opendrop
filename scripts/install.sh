@@ -158,7 +158,18 @@ build_owl() {
         return 1
     fi
 
-    install -m 755 owl /usr/local/bin/owl
+    # CMake places the binary in build/<source-subdir>/, here:
+    # build/daemon/owl. Find it instead of assuming a fixed path so
+    # the script survives any upstream re-layout.
+    local owl_bin
+    owl_bin="$(find . -type f -executable -name owl | head -n 1)"
+    if [ -z "${owl_bin}" ] || [ ! -x "${owl_bin}" ]; then
+        err "OWL build succeeded but binary not found under $(pwd)"
+        cd /
+        rm -rf "${tmp}"
+        return 1
+    fi
+    install -m 755 "${owl_bin}" /usr/local/bin/owl
     cd /
     rm -rf "${tmp}"
     info "OWL installed: $(command -v owl)"
