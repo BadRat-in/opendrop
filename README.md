@@ -23,7 +23,7 @@
 - **SEEMOO Lab** — Open Wireless Link project (https://owlink.org)
 
 **GUI Extension & Enhancements (this fork):**
-- Ravindra K. — GUI implementation, OWL systemd integration, uv migration
+- Ravindra Singh Budgurjar — GUI implementation, OWL systemd integration, uv migration
 
 **Original Research Papers:**
 - [PrivateDrop: Practical Privacy-Preserving Authentication for Apple AirDrop](https://www.usenix.org/conference/usenixsecurity21/presentation/heinrich) — USENIX Security '21
@@ -50,7 +50,7 @@
 
 ```bash
 # Clone this fork
-git clone https://github.com/YOURUSERNAME/opendrop opendrop-gui
+git clone https://github.com/BadRat-in/opendrop opendrop-gui
 cd opendrop-gui
 
 # Universal installer (auto-detects your distro: Debian/Ubuntu/Parrot,
@@ -204,7 +204,7 @@ For the full GUI experience with OWL integration:
 
 ```bash
 # Clone this fork
-git clone https://github.com/YOURUSERNAME/opendrop opendrop-gui
+git clone https://github.com/BadRat-in/opendrop opendrop-gui
 cd opendrop-gui
 
 # Install Python dependencies with uv
@@ -231,7 +231,7 @@ sudo bash scripts/install.sh
 If you want to modify the code:
 
 ```bash
-git clone https://github.com/YOURUSERNAME/opendrop opendrop-gui
+git clone https://github.com/BadRat-in/opendrop opendrop-gui
 cd opendrop-gui
 
 # Install in editable mode with dev dependencies
@@ -424,7 +424,7 @@ OpenDrop is the result of a research project and, thus, has several limitations 
 
 ### GUI Fork Contributors
 
-* **Ravindra K.** — PyQt6 GUI implementation, OWL systemd integration, uv migration
+* **Ravindra Singh Budgurjar** — PyQt6 GUI implementation, OWL systemd integration, uv migration
 
 All original protocol research, AirDrop reverse engineering, and core OpenDrop code are credited to the SEEMOO Lab team.
 

@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Bootstrap the BadRat-in/owl fork from upstream + this repo's patches/.
+#
+# Run this ONCE after creating https://github.com/BadRat-in/owl on the
+# GitHub web UI by forking seemoo-lab/owl. It will:
+#
+#   1. Clone seemoo-lab/owl into a scratch directory.
+#   2. Add BadRat-in/owl as a new remote.
+#   3. Apply every patch from patches/owl/*.patch.
+#   4. Commit and push to the fork's master branch.
+#
+# Safe to re-run — already-applied patches are skipped via `git am --skip`.
+#
+# Usage:
+#   bash scripts/setup-forks.sh            # uses default remotes
+#   FORK_OWNER=otheruser bash scripts/...  # override the fork owner
+
+set -euo pipefail
+
+FORK_OWNER="${FORK_OWNER:-BadRat-in}"
+FORK_REPO="${FORK_REPO:-owl}"
+UPSTREAM_URL="https://github.com/seemoo-lab/owl.git"
+FORK_URL="git@github.com:${FORK_OWNER}/${FORK_REPO}.git"
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PATCH_DIR="${REPO_ROOT}/patches/owl"
+WORK_DIR="$(mktemp -d -t owl-fork-XXXX)"
+
+trap 'rm -rf "${WORK_DIR}"' EXIT
+
+info() { echo -e "\e[36m[setup-forks]\e[0m $*"; }
+warn() { echo -e "\e[33m[setup-forks]\e[0m WARN: $*"; }
+err()  { echo -e "\e[31m[setup-forks]\e[0m ERROR: $*" >&2; }
+
+if [ ! -d "${PATCH_DIR}" ]; then
+    err "patch directory not found: ${PATCH_DIR}"
+    exit 1
+fi
+
+info "Cloning ${UPSTREAM_URL} into ${WORK_DIR}..."
+git clone --recursive "${UPSTREAM_URL}" "${WORK_DIR}/owl"
+
+cd "${WORK_DIR}/owl"
+
+# Configure committer identity from the user's global git config, falling
+# back to the fork owner if nothing's set.
+git_name="$(git config --global user.name || echo "${FORK_OWNER}")"
+git_email="$(git config --global user.email || echo "${FORK_OWNER}@users.noreply.github.com")"
+git config user.name "${git_name}"
+git config user.email "${git_email}"
+
+info "Adding fork remote: ${FORK_URL}"
+git remote remove fork 2>/dev/null || true
+git remote add fork "${FORK_URL}"
+
+# Apply patches in sorted order.
+patches=("${PATCH_DIR}"/*.patch)
+if [ ! -e "${patches[0]}" ]; then
+    warn "No patches found in ${PATCH_DIR}; nothing to apply."
+else
+    info "Applying $(ls "${PATCH_DIR}"/*.patch | wc -l) patch(es)..."
+    for p in "${patches[@]}"; do
+        info "  - $(basename "${p}")"
+        if ! git am --keep-cr "${p}"; then
+            err "Patch did not apply cleanly: ${p}"
+            err "Investigate with: cd ${WORK_DIR}/owl && git am --show-current-patch"
+            exit 2
+        fi
+    done
+fi
+
+info "Pushing to ${FORK_URL} (master)..."
+if ! git push --force-with-lease fork master; then
+    err "Push failed. Make sure:"
+    err "  1. You've forked seemoo-lab/owl on GitHub to ${FORK_OWNER}/${FORK_REPO}"
+    err "  2. Your SSH key is registered with GitHub (or change FORK_URL to HTTPS)"
+    err "  3. ${FORK_URL} is reachable"
+    exit 3
+fi
+
+info "Done. ${FORK_OWNER}/${FORK_REPO} now contains upstream + $(ls "${PATCH_DIR}"/*.patch 2>/dev/null | wc -l) patch(es)."
+info "scripts/install.sh will use this fork by default."

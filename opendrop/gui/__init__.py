@@ -1,6 +1,6 @@
 """
 OpenDrop: an open source AirDrop implementation
-Copyright (C) 2024  Ravindra K. (GUI extension)
+Copyright (C) 2024  Ravindra Singh Budgurjar (GUI extension)
 Copyright (C) 2018  Milan Stute
 Copyright (C) 2018  Alexander Heinrich
 
@@ -23,6 +23,6 @@ This module provides a PyQt6-based graphical interface for OpenDrop,
 including system tray integration, OWL lifecycle management, and AirDrop
 send/receive capabilities.
 
-GUI extension by Ravindra K. for seemoo-lab/opendrop
+GUI extension by Ravindra Singh Budgurjar for seemoo-lab/opendrop
 Original AirDrop protocol work by Milan Stute and Alexander Heinrich
 """

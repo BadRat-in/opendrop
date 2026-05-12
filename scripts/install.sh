@@ -124,27 +124,40 @@ build_owl() {
     info "Building OWL from source (this may take a couple of minutes)..."
     local tmp
     tmp="$(mktemp -d)"
-    git clone --recursive https://github.com/seemoo-lab/owl.git "${tmp}/owl"
+
+    # Default to the maintained fork, which already carries patches we need
+    # (notably: gating the bundled googletest behind -DBUILD_TESTS so GCC 14
+    # builds don't fail). Set OWL_REPO=... to override (e.g. for upstream).
+    local owl_repo="${OWL_REPO:-https://github.com/BadRat-in/owl.git}"
+    local owl_branch="${OWL_BRANCH:-master}"
+    info "Cloning ${owl_repo} (branch ${owl_branch})..."
+    if ! git clone --recursive --branch "${owl_branch}" \
+            "${owl_repo}" "${tmp}/owl"; then
+        warn "Failed to clone ${owl_repo}; falling back to upstream."
+        rm -rf "${tmp}/owl"
+        git clone --recursive https://github.com/seemoo-lab/owl.git "${tmp}/owl"
+        # Apply our patches manually if we fell back to upstream.
+        if [ -d "${REPO_ROOT}/patches/owl" ]; then
+            info "Applying local OWL patches..."
+            for patch in "${REPO_ROOT}/patches/owl"/*.patch; do
+                [ -f "${patch}" ] || continue
+                (cd "${tmp}/owl" && git apply "${patch}") || \
+                    warn "Patch did not apply cleanly: $(basename "${patch}")"
+            done
+        fi
+    fi
+
     cd "${tmp}/owl"
     mkdir -p build
     cd build
-
-    # OWL bundles googletest, which fails to compile on GCC 14+ because of
-    # -Werror=maybe-uninitialized. We don't need the tests for an end-user
-    # install, so disable test building and explicitly build only the `owl`
-    # target. The CMakeLists doesn't define BUILD_TESTING, but skipping the
-    # default `all` target and naming `owl` avoids the gtest subdirectory.
     cmake -DCMAKE_BUILD_TYPE=Release ..
-    if ! make -j"$(nproc)" owl; then
+    if ! make -j"$(nproc)"; then
         err "OWL build failed."
         cd /
         rm -rf "${tmp}"
         return 1
     fi
 
-    # OWL's `make install` would also try to recurse into the broken gtest
-    # subdir. Install the single binary by hand — that's all `make install`
-    # ends up doing anyway (CMakeLists only installs the `owl` target).
     install -m 755 owl /usr/local/bin/owl
     cd /
     rm -rf "${tmp}"

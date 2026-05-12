@@ -1,6 +1,6 @@
 """
 OpenDrop: an open source AirDrop implementation
-Copyright (C) 2024  Ravindra K. (GUI extension)
+Copyright (C) 2024  Ravindra Singh Budgurjar (GUI extension)
 Copyright (C) 2018  Milan Stute
 Copyright (C) 2018  Alexander Heinrich
 

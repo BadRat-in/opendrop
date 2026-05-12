@@ -1,0 +1,45 @@
+From: Ravindra Singh Budgurjar <ravindra@budgurjar.org>
+Subject: [PATCH] Gate tests and bundled googletest behind a BUILD_TESTS option
+
+OWL's CMakeLists.txt unconditionally adds the googletest subdirectory and
+the tests/ target. End users building OWL just to get the daemon do not
+need either, and the bundled googletest version fails to compile under
+GCC 14+ with:
+
+    error: 'dummy' may be used uninitialized [-Werror=maybe-uninitialized]
+
+at googletest/googletest/src/gtest-death-test.cc:1301. The fix in
+upstream googletest is to mark `dummy` as deliberately uninitialized,
+but the version vendored here predates that fix and rebasing the
+submodule is out of scope for this patch.
+
+This change introduces `-DBUILD_TESTS=ON` (default OFF) so that:
+  - end-user builds (`cmake .. && make`) succeed on GCC 14+,
+  - the existing test workflow (`cmake -DBUILD_TESTS=ON ..`) is
+    preserved for developers who want it.
+
+No other behavior changes.
+
+Signed-off-by: Ravindra Singh Budgurjar <ravindra@budgurjar.org>
+---
+ CMakeLists.txt | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 0000000..0000001 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -13,7 +13,9 @@ add_subdirectory(src)
+
+ add_subdirectory(daemon)
+
+-option(INSTALL_GTEST "" OFF)
+-add_subdirectory(googletest)
+-
+-add_subdirectory(tests)
++option(BUILD_TESTS "Build the unit tests (requires a working bundled googletest)" OFF)
++if(BUILD_TESTS)
++    option(INSTALL_GTEST "" OFF)
++    add_subdirectory(googletest)
++    add_subdirectory(tests)
++endif()

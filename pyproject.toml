@@ -14,7 +14,7 @@ authors = [
     { name = "Alexander Heinrich" },
 ]
 maintainers = [
-    { name = "Ravindra K.", email = "ravindra@rkinnovate.com" },
+    { name = "Ravindra Singh Budgurjar", email = "ravindra@budgurjar.org" },
 ]
 keywords = ["airdrop", "awdl", "owl", "wifi", "filesharing"]
 classifiers = [
@@ -55,7 +55,7 @@ opendrop-doctor = "opendrop.doctor:main"
 Homepage = "https://owlink.org"
 Upstream = "https://github.com/seemoo-lab/opendrop"
 Documentation = "https://github.com/seemoo-lab/opendrop"
-Repository = "https://github.com/YOURUSERNAME/opendrop"
+Repository = "https://github.com/BadRat-in/opendrop"
 
 [tool.hatch.build.targets.wheel]
 packages = ["opendrop"]
