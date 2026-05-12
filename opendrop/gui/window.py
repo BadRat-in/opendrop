@@ -101,13 +101,72 @@ class MainWindow(QWidget):
         # Build UI
         self._build_ui()
 
+        # Check hardware compatibility and surface any warnings to the user
+        # immediately, instead of letting them discover incompatible hardware
+        # through cryptic OWL failures.
+        self._check_compatibility()
+
         # Auto-start OWL if configured
         if self.settings.auto_start_owl:
             QTimer.singleShot(500, self._on_start_owl_clicked)
 
+    def _check_compatibility(self) -> None:
+        """Run a one-shot hardware probe and display warnings if needed."""
+        try:
+            from opendrop.hardware import AWDLCompatibility, detect
+
+            report = detect()
+        except Exception as e:
+            logger.warning(f"Hardware probe failed: {e}")
+            return
+
+        if report.awdl_compatibility == AWDLCompatibility.LIKELY:
+            # All good — no banner.
+            return
+
+        verdict = {
+            AWDLCompatibility.UNLIKELY: (
+                "Your Wi-Fi chipset is unlikely to work with OWL/AWDL. "
+                "Apple device discovery may not function. "
+                "Run <code>opendrop-doctor</code> in a terminal for details."
+            ),
+            AWDLCompatibility.NOT_SUPPORTED: (
+                "Your Wi-Fi driver doesn't support monitor mode — "
+                "AirDrop with Apple devices won't work. "
+                "Use a USB Wi-Fi adapter (Atheros AR9271 recommended)."
+            ),
+            AWDLCompatibility.OWL_NOT_INSTALLED: (
+                "OWL is not installed. Apple device discovery will not work. "
+                "Run <code>scripts/install.sh</code> or install OWL manually."
+            ),
+            AWDLCompatibility.UNKNOWN: (
+                "Couldn't determine Wi-Fi compatibility. "
+                "Run <code>opendrop-doctor</code> for a diagnostic."
+            ),
+        }.get(
+            report.awdl_compatibility,
+            "Compatibility check completed with warnings.",
+        )
+
+        self.compat_banner.setText(f"⚠️  {verdict}")
+        self.compat_banner.setVisible(True)
+        for note in report.notes[:2]:
+            logger.warning(f"Hardware: {note}")
+
     def _build_ui(self) -> None:
         """Build the main window UI layout."""
         layout = QVBoxLayout()
+
+        # ===== Hardware capability banner (only shown when issues exist) =====
+        self.compat_banner = QLabel("")
+        self.compat_banner.setWordWrap(True)
+        self.compat_banner.setStyleSheet(
+            "padding: 8px; border-radius: 4px;"
+            " background-color: #fff3cd; color: #856404;"
+            " border: 1px solid #ffeeba;"
+        )
+        self.compat_banner.setVisible(False)
+        layout.addWidget(self.compat_banner)
 
         # ===== Status Panel =====
         status_label = QLabel("AWDL Status:")

@@ -53,12 +53,24 @@
 git clone https://github.com/YOURUSERNAME/opendrop opendrop-gui
 cd opendrop-gui
 
-# Install with uv
-uv sync --extra gui
-
-# One-time setup (requires root)
-sudo bash scripts/setup-owl.sh
+# Universal installer (auto-detects your distro: Debian/Ubuntu/Parrot,
+# Fedora/RHEL, Arch/Manjaro, openSUSE, Alpine, Void).
+sudo bash scripts/install.sh
 ```
+
+### 1a. Check hardware compatibility
+
+Before launching the GUI, run the diagnostic:
+
+```bash
+opendrop-doctor
+```
+
+It tells you, in plain English:
+- whether your Wi-Fi chipset can run AWDL (some Intel CNVi chips cannot),
+- whether Bluetooth is set up for BLE wake-up (required to discover Apple devices),
+- whether OWL is installed,
+- and exactly which features will work right now.
 
 ### 2. Launch the GUI
 
@@ -108,7 +120,7 @@ This system uses OWL (Open Wireless Link) to emulate Apple's AWDL protocol. On m
 4. You can send/receive files while OWL runs
 5. Click "Stop OWL" → Normal WiFi operation resumes
 
-**Hardware Note:** Some modern WiFi chips (Intel AX200, newer Realtek) support concurrent monitor+station mode. If your hardware supports this, WiFi will NOT be interrupted. The GUI checks this and shows a warning if needed.
+**Hardware Note:** Some Wi-Fi chips support concurrent monitor+managed mode (no Wi-Fi interruption). Most Intel CNVi chips (AX201, AX210, AX211, Wireless-AC 9560/9462) do **not** — OWL will fail on them with `Operation not supported`. If `opendrop-doctor` says your chipset is `UNLIKELY`, use a USB Wi-Fi adapter with an Atheros AR9271 or Realtek RTL8812 chipset instead. See [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) for the full hardware compatibility matrix.
 
 To check your hardware:
 ```bash

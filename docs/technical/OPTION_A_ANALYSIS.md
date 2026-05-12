@@ -1,5 +1,20 @@
 # Option A Analysis: GUI Without OWL - Complete Assessment
 
+> **⚠️ This document is OUTDATED and contained inaccurate claims.**
+>
+> The "fully operational without AWDL" verdict below was incorrect. Apple
+> devices only advertise `_airdrop._tcp` on their AWDL interface — never on
+> regular Wi-Fi — so OpenDrop on Linux cannot *discover* them without OWL
+> running. The asymmetry in the original analysis (Apple sees OpenDrop, but
+> OpenDrop can't see Apple) is the symptom of this protocol design.
+>
+> See **[docs/HOW_IT_WORKS.md](../HOW_IT_WORKS.md)** for the corrected,
+> honest assessment.
+>
+> Left in the tree only for diff history. **Do not rely on this file.**
+
+---
+
 ## Question 1: Will macOS File Transfer Work Without AWDL?
 
 ### **YES - FULLY OPERATIONAL** ✅
