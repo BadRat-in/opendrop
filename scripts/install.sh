@@ -224,32 +224,96 @@ install_desktop_files() {
     fi
 }
 
-install_opendrop_python() {
-    # Install into a dedicated venv at /opt/opendrop. This:
-    #   - avoids PEP 668 EXTERNALLY-MANAGED refusal on Debian/Parrot,
-    #   - leaves the system Python untouched,
-    #   - lets us uninstall cleanly with `rm -rf /opt/opendrop`,
-    #   - works identically on Fedora, Arch, openSUSE, Alpine, Void.
-    local venv=/opt/opendrop
-    info "Installing OpenDrop into ${venv}..."
+_invoking_user_home() {
+    # Under sudo / pkexec we run as root but the real user is the one who
+    # called us. They typically have uv installed in their home.
+    if [ -n "${SUDO_USER:-}" ]; then
+        getent passwd "${SUDO_USER}" | cut -d: -f6
+    elif [ -n "${PKEXEC_UID:-}" ]; then
+        getent passwd "${PKEXEC_UID}" | cut -d: -f6
+    else
+        echo "${HOME:-/root}"
+    fi
+}
 
-    if ! python3 -m venv --help >/dev/null 2>&1; then
-        err "python3 -m venv unavailable. Install python3-venv (Debian),"
-        err "  python3-virtualenv (Alpine), or python3-full."
+find_uv() {
+    # System-wide first (predictable for pkexec/sudo PATH).
+    for p in /usr/local/bin/uv /usr/bin/uv; do
+        [ -x "$p" ] && { echo "$p"; return 0; }
+    done
+    # Then the invoking user's typical uv locations.
+    local user_home
+    user_home="$(_invoking_user_home)"
+    for p in "${user_home}/.local/bin/uv" "${user_home}/.cargo/bin/uv"; do
+        [ -x "$p" ] && { echo "$p"; return 0; }
+    done
+    return 1
+}
+
+install_uv_systemwide() {
+    info "  installing uv to /usr/local/bin/uv (one-time)..."
+    if command -v curl >/dev/null 2>&1; then
+        curl -LsSf https://astral.sh/uv/install.sh | \
+            env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh >/dev/null
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- https://astral.sh/uv/install.sh | \
+            env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh >/dev/null
+    else
+        err "Neither curl nor wget available; install uv manually."
         return 1
     fi
+    [ -x /usr/local/bin/uv ]
+}
 
-    # Drop a stale venv only if it exists; re-runs should be idempotent.
+install_opendrop_python() {
+    # Install into a dedicated venv at /opt/opendrop using uv. This:
+    #   - uses the pinned versions in uv.lock for reproducible installs,
+    #   - is 10-100x faster than pip,
+    #   - avoids PEP 668 EXTERNALLY-MANAGED on Debian/Parrot,
+    #   - leaves system Python untouched,
+    #   - removes cleanly with `rm -rf /opt/opendrop`,
+    #   - works identically on Fedora, Arch, openSUSE, Alpine, Void.
+    local venv=/opt/opendrop
+    info "Installing OpenDrop into ${venv} (via uv)..."
+
+    local uv
+    if ! uv="$(find_uv)"; then
+        info "  uv not on PATH or in invoking user's home; bootstrapping..."
+        if ! install_uv_systemwide; then
+            err "Failed to install uv."
+            return 1
+        fi
+        uv=/usr/local/bin/uv
+    fi
+    info "  using uv: ${uv} ($("${uv}" --version 2>/dev/null | head -1))"
+
     if [ -d "${venv}" ]; then
         info "  removing previous venv at ${venv}"
         rm -rf "${venv}"
     fi
-    python3 -m venv "${venv}"
-    "${venv}/bin/pip" install --upgrade pip >/dev/null
 
-    if ! "${venv}/bin/pip" install -e "${REPO_ROOT}[gui]"; then
-        err "OpenDrop pip install failed."
+    # Create the venv with uv (faster than python -m venv, picks the right
+    # Python interpreter automatically).
+    "${uv}" venv "${venv}" || {
+        err "uv venv failed."
         return 1
+    }
+
+    # Install from the lockfile if available — reproducible. Otherwise fall
+    # back to uv's pip-compat interface.
+    if [ -f "${REPO_ROOT}/uv.lock" ]; then
+        info "  syncing from uv.lock (--extra gui)"
+        (cd "${REPO_ROOT}" && VIRTUAL_ENV="${venv}" "${uv}" sync --extra gui) || {
+            err "uv sync failed."
+            return 1
+        }
+    else
+        info "  uv.lock not present, falling back to uv pip install"
+        "${uv}" pip install --python "${venv}/bin/python" \
+            -e "${REPO_ROOT}[gui]" || {
+            err "uv pip install failed."
+            return 1
+        }
     fi
 
     # Symlink CLI entry points into /usr/local/bin so they're on every
