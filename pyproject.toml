@@ -32,6 +32,7 @@ classifiers = [
 ]
 dependencies = [
     "Pillow>=10.0",
+    "bleak>=3.0.2",
     "fleep",
     "ifaddr",
     "libarchive-c",

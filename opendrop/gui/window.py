@@ -44,6 +44,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 
 from opendrop.config import AirDropConfig
+from opendrop.gui.ble_worker import BLEAdvertiseWorker, BLEScanWorker
 from opendrop.gui.owl_manager import OWLManager
 from opendrop.gui.settings import OpenDropSettings
 from opendrop.gui.settings_dialog import SettingsDialog
@@ -94,6 +95,8 @@ class MainWindow(QWidget):
         self.browse_worker: Optional[BrowseWorker] = None
         self.send_worker: Optional[SendWorker] = None
         self.receive_worker: Optional[ReceiveWorker] = None
+        self.ble_scan_worker: Optional[BLEScanWorker] = None
+        self.ble_advertise_worker: Optional[BLEAdvertiseWorker] = None
 
         # Build UI
         self._build_ui()
@@ -302,6 +305,93 @@ class MainWindow(QWidget):
             logger.error(f"Failed to start device browsing: {e}")
             QMessageBox.critical(self, "Error", f"Failed to start browsing: {e}")
 
+        # Also start BLE scanning. Apple devices only put themselves on mDNS
+        # after they hear an AirDrop BLE beacon, so scanning lets us surface
+        # them in the device list even when mDNS hasn't caught up yet.
+        self._start_ble_scan()
+
+    def _start_ble_scan(self) -> None:
+        """Spin up a BLE scanner if one isn't already running."""
+        if self.ble_scan_worker is not None and self.ble_scan_worker.isRunning():
+            return
+        self.ble_scan_worker = BLEScanWorker(self)
+        self.ble_scan_worker.device_found.connect(self._on_ble_device_found)
+        self.ble_scan_worker.error.connect(self._on_ble_scan_error)
+        self.ble_scan_worker.started.connect(lambda: logger.info("BLE scanner active"))
+        self.ble_scan_worker.start()
+
+    def _on_ble_device_found(self, ble_dev: Dict) -> None:
+        """
+        Handle a BLE-discovered Apple device.
+
+        We merge into the existing mDNS device list using a synthetic id so the
+        user sees one row per physical device. When mDNS later finds the same
+        device (after AWDL comes up) the entries are reconciled.
+        """
+        addr = ble_dev.get("address") or ""
+        if not addr:
+            return
+        device_id = f"ble:{ble_dev.get('short_id') or addr.replace(':', '').lower()}"
+        rssi = ble_dev.get("rssi", 0)
+        display_name = ble_dev.get("name") or "Apple device (BLE)"
+
+        # Build a device_info dict that's shape-compatible with mDNS results so
+        # downstream code (send button, etc.) can treat them uniformly.
+        device_info = {
+            "id": device_id,
+            "name": display_name,
+            "address": "",  # No IP yet — we only have BLE address
+            "port": 0,
+            "ble_address": addr,
+            "rssi": rssi,
+            "source": "ble",
+            "properties": {},
+        }
+
+        # Update if we already have it, otherwise insert.
+        for i in range(self.device_list.count()):
+            item = self.device_list.item(i)
+            existing = item.data(Qt.ItemDataRole.UserRole) or {}
+            if existing.get("id") == device_id:
+                # Refresh RSSI in case it changed
+                existing.update({"rssi": rssi})
+                item.setData(Qt.ItemDataRole.UserRole, existing)
+                return
+
+        item = QListWidgetItem(f"{display_name}  (BLE, rssi {rssi})")
+        item.setData(Qt.ItemDataRole.UserRole, device_info)
+        self.device_list.addItem(item)
+        logger.debug(f"BLE device added: {device_id}")
+
+    def _on_ble_scan_error(self, error: str) -> None:
+        """BLE scan failures are non-fatal — log and continue with mDNS only."""
+        logger.warning(f"BLE scan: {error}")
+
+    def _start_ble_advertise(self) -> None:
+        """Begin advertising our AirDrop BLE beacon (wakes nearby Apples)."""
+        if (
+            self.ble_advertise_worker is not None
+            and self.ble_advertise_worker.isRunning()
+        ):
+            return
+        self.ble_advertise_worker = BLEAdvertiseWorker(self)
+        self.ble_advertise_worker.started.connect(
+            lambda: logger.info("BLE advertiser broadcasting AirDrop beacon")
+        )
+        self.ble_advertise_worker.error.connect(
+            lambda err: logger.warning(f"BLE advertise: {err}")
+        )
+        self.ble_advertise_worker.start()
+
+    def _stop_ble_workers(self) -> None:
+        """Stop any running BLE scan/advertise workers."""
+        if self.ble_advertise_worker is not None:
+            self.ble_advertise_worker.stop()
+            self.ble_advertise_worker = None
+        if self.ble_scan_worker is not None:
+            self.ble_scan_worker.stop()
+            self.ble_scan_worker = None
+
     def _on_device_found(self, device_info: Dict) -> None:
         """Add or update a discovered device in the list.
 
@@ -444,6 +534,12 @@ class MainWindow(QWidget):
                 self.receive_worker.error.connect(self._on_receive_error)
                 self.receive_worker.start()
 
+                # Start BLE advertising and scanning while we're receiving.
+                # Advertising wakes Apple devices' AWDL stack so they can see
+                # us on mDNS; scanning surfaces those devices in the UI.
+                self._start_ble_advertise()
+                self._start_ble_scan()
+
                 self.settings.receiving_enabled = True
                 self.settings.save()
 
@@ -456,6 +552,8 @@ class MainWindow(QWidget):
             if self.receive_worker:
                 self.receive_worker.stop()
                 self.receive_worker = None
+            # Also tear down BLE workers so we stop advertising and scanning.
+            self._stop_ble_workers()
             self.settings.receiving_enabled = False
             self.settings.save()
 
@@ -520,4 +618,5 @@ class MainWindow(QWidget):
             self.browse_worker.stop()
         if self.receive_worker:
             self.receive_worker.stop()
+        self._stop_ble_workers()
         super().closeEvent(event)
