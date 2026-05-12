@@ -20,8 +20,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 OWL AWDL daemon lifecycle management for the GUI.
 
 Manages starting/stopping the OWL systemd service, monitoring awdl0 interface
-status, and emitting signals for GUI state updates. Uses subprocess to call
-systemctl (which is authorized via sudoers for no-password operation).
+status, and emitting signals for GUI state updates. Handles privilege escalation
+via password dialog (GUI) instead of relying on pre-configured sudoers.
 """
 
 import logging
@@ -38,6 +38,7 @@ except ImportError:
     QTimer = None
 
 from opendrop.util import AirDropUtil
+from opendrop.gui.privilege import SudoExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ class OWLManager(QObject):
         self._awdl0_present = False
         self._wifi_disruption_checked = False
         self._supports_concurrent_mode = False
+        self._sudo_executor = SudoExecutor(parent=parent)
 
     def check_hardware_capability(self) -> bool:
         """
@@ -119,7 +121,8 @@ class OWLManager(QObject):
         """
         Execute a systemctl command for the owl-awdl service.
 
-        Uses sudo (authorized via /etc/sudoers.d/opendrop for no password).
+        Uses SudoExecutor which prompts for password via GUI dialog if needed.
+        No pre-configured sudoers required.
 
         Args:
             command: One of "start", "stop", or "status"
@@ -127,32 +130,18 @@ class OWLManager(QObject):
         Returns:
             True if command succeeded, False otherwise
         """
-        try:
-            result = subprocess.run(
-                ["sudo", "systemctl", command, "owl-awdl.service"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
+        description = f"{'Start' if command == 'start' else 'Stop' if command == 'stop' else 'Check'} OWL AWDL service"
+        success, output, error = self._sudo_executor.execute(
+            ["systemctl", command, "owl-awdl.service"],
+            description=description
+        )
 
-            if result.returncode == 0:
-                logger.info(f"systemctl {command} succeeded")
-                return True
-            else:
-                error_msg = result.stderr.strip() or result.stdout.strip()
-                logger.error(f"systemctl {command} failed: {error_msg}")
-                self.owl_error.emit(f"Failed to {command} OWL: {error_msg}")
-                return False
-
-        except subprocess.TimeoutExpired:
-            msg = f"systemctl {command} timed out"
-            logger.error(msg)
-            self.owl_error.emit(msg)
-            return False
-        except FileNotFoundError:
-            msg = "sudo or systemctl not found"
-            logger.error(msg)
-            self.owl_error.emit(msg)
+        if success:
+            logger.info(f"systemctl {command} succeeded")
+            return True
+        else:
+            logger.error(f"systemctl {command} failed: {error}")
+            self.owl_error.emit(f"Failed to {command} OWL: {error}")
             return False
 
     def _poll_for_awdl0(self) -> None:
