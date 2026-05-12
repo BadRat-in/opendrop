@@ -22,7 +22,6 @@ import os
 import random
 import socket
 import ssl
-import subprocess
 
 try:
     from importlib.resources import files
@@ -143,31 +142,56 @@ class AirDropConfig:
             logger.debug("No Apple ID Validation Record found")
 
     def create_default_key(self):
+        """
+        Generate a self-signed RSA-2048 certificate and key.
+
+        Uses the `cryptography` library so we don't depend on the openssl
+        CLI being installed. Some minimal Linux distros (Alpine, Void) do
+        not ship openssl by default, and shelling out for cert generation
+        was an unnecessary fork.
+        """
+        import datetime
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.x509.oid import NameOID
+
         logger.info(f"Create new self-signed certificate in {self.key_dir}")
         if not os.path.exists(self.key_dir):
             os.makedirs(self.key_dir)
-        subprocess.run(
-            [
-                "openssl",
-                "req",
-                "-newkey",
-                "rsa:2048",
-                "-nodes",
-                "-keyout",
-                "key.pem",
-                "-x509",
-                "-days",
-                "365",
-                "-out",
-                "certificate.pem",
-                "-subj",
-                f"/CN={self.computer_name}",
-            ],
-            cwd=self.key_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True,
+
+        # 2048-bit RSA matches the original openssl call and Apple expects it.
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        subject = issuer = x509.Name(
+            [x509.NameAttribute(NameOID.COMMON_NAME, self.computer_name)]
         )
+        not_before = datetime.datetime.now(datetime.timezone.utc)
+        not_after = not_before + datetime.timedelta(days=365)
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(private_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(not_before)
+            .not_valid_after(not_after)
+            .sign(private_key, hashes.SHA256())
+        )
+
+        # Unencrypted PEM key (matches -nodes).
+        key_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        cert_pem = cert.public_bytes(serialization.Encoding.PEM)
+
+        with open(self.key_file, "wb") as f:
+            f.write(key_pem)
+        os.chmod(self.key_file, 0o600)
+        with open(self.cert_file, "wb") as f:
+            f.write(cert_pem)
 
     def get_ssl_context(self):
 
