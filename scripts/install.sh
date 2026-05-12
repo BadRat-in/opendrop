@@ -178,6 +178,65 @@ build_owl() {
     info "OWL installed: /usr/local/bin/owl"
 }
 
+detect_wifi_interface() {
+    # First wireless interface visible to the kernel. Works without
+    # NetworkManager, on systemd-networkd, iwd, even busybox-only systems.
+    if [ -d /sys/class/net ]; then
+        for iface in /sys/class/net/*; do
+            local name
+            name="$(basename "${iface}")"
+            if [ -d "${iface}/wireless" ] || [ -d "${iface}/phy80211" ]; then
+                echo "${name}"
+                return 0
+            fi
+        done
+    fi
+    return 1
+}
+
+install_owl_service() {
+    # systemd-only for now; init system abstraction is future work.
+    if ! command -v systemctl >/dev/null 2>&1; then
+        warn "systemctl not present; skipping owl-awdl.service install."
+        warn "  Start OWL manually: sudo /usr/local/bin/owl -i <wifi-iface>"
+        return
+    fi
+    if [ ! -x /usr/local/bin/owl ]; then
+        warn "owl binary missing; skipping service install."
+        return
+    fi
+    local svc_src="${REPO_ROOT}/packaging/owl-awdl.service"
+    local defaults_src="${REPO_ROOT}/packaging/owl.default"
+    if [ ! -f "${svc_src}" ]; then
+        warn "${svc_src} not found; skipping service install."
+        return
+    fi
+
+    info "Installing owl-awdl.service into /etc/systemd/system/"
+    install -m 644 "${svc_src}" /etc/systemd/system/owl-awdl.service
+
+    # /etc/default/owl is user-editable config. Only seed it on first
+    # install; don't overwrite an existing one.
+    if [ ! -f /etc/default/owl ]; then
+        local iface
+        if iface="$(detect_wifi_interface)"; then
+            info "  detected WiFi interface: ${iface}"
+            sed "s|^WIFI_INTERFACE=.*|WIFI_INTERFACE=${iface}|" \
+                "${defaults_src}" > /etc/default/owl
+        else
+            warn "  could not detect a WiFi interface; using default (wlo1)"
+            install -m 644 "${defaults_src}" /etc/default/owl
+        fi
+        chmod 644 /etc/default/owl
+        info "  edit /etc/default/owl to change WIFI_INTERFACE"
+    else
+        info "  /etc/default/owl already present, not overwriting"
+    fi
+
+    systemctl daemon-reload || true
+    info "  start later with: sudo systemctl start owl-awdl"
+}
+
 install_polkit_policy() {
     local policy_dir=/usr/share/polkit-1/actions
     local src="${REPO_ROOT}/packaging/org.opendrop.policy"
@@ -292,23 +351,21 @@ install_opendrop_python() {
         rm -rf "${venv}"
     fi
 
-    # Create the venv with uv (faster than python -m venv, picks the right
-    # Python interpreter automatically).
-    "${uv}" venv "${venv}" || {
-        err "uv venv failed."
-        return 1
-    }
-
-    # Install from the lockfile if available — reproducible. Otherwise fall
-    # back to uv's pip-compat interface.
+    # Install from the lockfile if available — reproducible. We pass
+    # UV_PROJECT_ENVIRONMENT (not VIRTUAL_ENV) so uv treats /opt/opendrop
+    # as THIS project's venv for the duration of the command. uv sync will
+    # create it if missing. The user's ~/Projects/opendrop/.venv is left
+    # entirely untouched.
     if [ -f "${REPO_ROOT}/uv.lock" ]; then
-        info "  syncing from uv.lock (--extra gui)"
-        (cd "${REPO_ROOT}" && VIRTUAL_ENV="${venv}" "${uv}" sync --extra gui) || {
+        info "  syncing from uv.lock (--extra gui) into ${venv}"
+        (cd "${REPO_ROOT}" && \
+            UV_PROJECT_ENVIRONMENT="${venv}" "${uv}" sync --extra gui) || {
             err "uv sync failed."
             return 1
         }
     else
         info "  uv.lock not present, falling back to uv pip install"
+        "${uv}" venv "${venv}" || return 1
         "${uv}" pip install --python "${venv}/bin/python" \
             -e "${REPO_ROOT}[gui]" || {
             err "uv pip install failed."
@@ -331,6 +388,7 @@ main() {
     detect_distro
     install_packages
     build_owl
+    install_owl_service
     install_polkit_policy
     install_desktop_files
     install_opendrop_python

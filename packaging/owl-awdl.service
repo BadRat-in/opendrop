@@ -1,0 +1,21 @@
+[Unit]
+Description=OWL — open Apple Wireless Direct Link daemon
+Documentation=https://github.com/seemoo-lab/owl https://github.com/BadRat-in/owl
+After=network.target
+
+[Service]
+# /etc/default/owl is written by scripts/install.sh and supplies
+# WIFI_INTERFACE; the dash before the path means "fail silently if absent".
+EnvironmentFile=-/etc/default/owl
+# Sensible default if /etc/default/owl is missing or doesn't set the var.
+Environment=WIFI_INTERFACE=wlo1
+Type=simple
+ExecStart=/usr/local/bin/owl -i ${WIFI_INTERFACE}
+Restart=on-failure
+RestartSec=5
+# OWL puts the Wi-Fi card into monitor mode and synthesizes an awdl0
+# interface; both require CAP_NET_ADMIN / CAP_NET_RAW. We run as root
+# rather than fine-grained caps because OWL still does its own privilege
+# checks against the netlink socket.
+[Install]
+WantedBy=multi-user.target

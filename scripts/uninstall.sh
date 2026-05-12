@@ -70,17 +70,20 @@ remove_desktop_entries() {
         update-desktop-database 2>/dev/null || true
 }
 
-remove_legacy_systemd() {
-    # Older installs put an owl-awdl.service in /etc/systemd. install.sh
-    # doesn't do that, but if the old one is around, clean it up.
+remove_owl_service() {
     if [ -f /etc/systemd/system/owl-awdl.service ]; then
         systemctl stop owl-awdl.service 2>/dev/null || true
         systemctl disable owl-awdl.service 2>/dev/null || true
         rm -f /etc/systemd/system/owl-awdl.service
         systemctl daemon-reload 2>/dev/null || true
-        info "removed legacy owl-awdl.service"
+        info "removed owl-awdl.service"
     fi
-    # Legacy sudoers file from setup-owl.sh.
+    # /etc/default/owl is user-editable config. Only nuke it on --purge.
+    if [ "${PURGE}" -eq 1 ] && [ -f /etc/default/owl ]; then
+        rm -f /etc/default/owl
+        info "removed /etc/default/owl"
+    fi
+    # Legacy sudoers file from the old setup-owl.sh.
     remove_path /etc/sudoers.d/opendrop
 }
 
@@ -123,7 +126,7 @@ purge_user_data() {
 need_root "$@"
 remove_polkit
 remove_desktop_entries
-remove_legacy_systemd
+remove_owl_service
 uninstall_python
 
 if [ "${PURGE}" -eq 1 ]; then

@@ -1,0 +1,9 @@
+# Configuration for the OWL AWDL daemon. Edit and reload with:
+#   sudo systemctl daemon-reload
+#   sudo systemctl restart owl-awdl
+#
+# WIFI_INTERFACE: the wireless interface OWL uses as the basis for the
+#                 synthesized awdl0 link. Must support monitor mode + frame
+#                 injection. Run `opendrop-doctor` to see what your host
+#                 actually has.
+WIFI_INTERFACE=wlo1
