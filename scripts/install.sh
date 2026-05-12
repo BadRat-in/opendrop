@@ -151,15 +151,20 @@ install_desktop_files() {
         fi
     done
 
-    # Icon: we don't ship an SVG yet, but copy a reasonable PNG if present.
-    local icon_dir=/usr/share/icons/hicolor/256x256/apps
-    if [ -f "${REPO_ROOT}/opendrop/gui/resources/icon_active.png" ]; then
-        install -D -m 644 \
-            "${REPO_ROOT}/opendrop/gui/resources/icon_active.png" \
-            "${icon_dir}/opendrop.png"
-        # Refresh the icon cache if available.
+    # Install the full hicolor icon set (16-512). The icons live in
+    # opendrop/gui/resources/hicolor/<size>/apps/opendrop.png in the repo.
+    local src_hicolor="${REPO_ROOT}/opendrop/gui/resources/hicolor"
+    local dest_hicolor=/usr/share/icons/hicolor
+    if [ -d "${src_hicolor}" ]; then
+        for size_dir in "${src_hicolor}"/*; do
+            local size="$(basename "${size_dir}")"
+            local src_png="${size_dir}/apps/opendrop.png"
+            [ -f "${src_png}" ] || continue
+            install -D -m 644 "${src_png}" "${dest_hicolor}/${size}/apps/opendrop.png"
+        done
+        info "Installed hicolor icons into ${dest_hicolor}/<size>/apps/"
         command -v gtk-update-icon-cache >/dev/null 2>&1 && \
-            gtk-update-icon-cache -f /usr/share/icons/hicolor || true
+            gtk-update-icon-cache -f "${dest_hicolor}" 2>/dev/null || true
     fi
 }
 
