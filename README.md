@@ -38,7 +38,7 @@
 ✅ **AirDrop Compatible** — Send/receive files with iOS and macOS devices  
 ✅ **Graphical Interface** — Modern PyQt6 GUI with system tray integration  
 ✅ **OWL AWDL Support** — Integrated Linux AWDL implementation  
-✅ **Easy Setup** — One-command installation with `setup-owl.sh`  
+✅ **Easy Setup** — One-command installation with `scripts/install.sh`  
 ✅ **uv Managed** — Modern Python package management  
 ✅ **Contacts Mode** — Support for Apple ID-based authentication (via keychain extractor)  
 
@@ -210,16 +210,21 @@ cd opendrop-gui
 # Install Python dependencies with uv
 uv sync --extra gui
 
-# One-time system setup (requires sudo)
-sudo bash scripts/setup-owl.sh
+# One-time system setup (requires sudo).
+# Auto-detects Debian/Ubuntu/Parrot, Fedora/RHEL, Arch/Manjaro, openSUSE,
+# Alpine, and Void. Installs system dependencies, builds OWL from source,
+# installs the polkit policy, and registers .desktop entries.
+sudo bash scripts/install.sh
 ```
 
-The `setup-owl.sh` script will:
-- Validate OWL binary installation
-- Check WiFi hardware capability
-- Install the OWL systemd service
-- Configure sudoers for privilege-less OWL control
-- Create the desktop launcher
+`scripts/install.sh` does:
+- Detect distro and install matching system packages (libpcap, libev,
+  libnl, bluez, build tools).
+- Build OWL from source if not already on PATH.
+- Install the polkit policy at /usr/share/polkit-1/actions so the GUI
+  can ask for privileges via a graphical dialog instead of a tty sudo.
+- Install opendrop.desktop / opendrop-doctor.desktop into the app menu.
+- pip-install OpenDrop with the GUI extra.
 
 ### Option 3: Development Installation
 
@@ -375,16 +380,15 @@ OpenDrop uses a "virtual monitor interface" approach:
 
 ### Privilege Escalation
 
-The GUI runs as a regular user. Only OWL (running via systemd service) needs root. Privilege escalation is configured via:
+The GUI runs as a regular user. Only OWL (running via systemd service)
+needs root. Privilege escalation uses **polkit** (pkexec) when available,
+with a graphical authentication dialog. The polkit policy is installed
+by `scripts/install.sh` at `/usr/share/polkit-1/actions/org.opendrop.policy`.
 
-```bash
-# /etc/sudoers.d/opendrop (installed by setup-owl.sh)
-%sudo ALL=(ALL) NOPASSWD: /usr/bin/systemctl start owl-awdl.service
-%sudo ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop owl-awdl.service
-%sudo ALL=(ALL) NOPASSWD: /usr/bin/systemctl status owl-awdl.service
-```
+If polkit isn't present we fall back to `sudo`, prompting via the GUI.
+No `NOPASSWD` sudoers entry is required.
 
-The GUI calls `sudo systemctl <cmd> owl-awdl.service` without password prompts.
+For details on the abstraction, see `opendrop/platform_compat.py`.
 
 ---
 
@@ -441,8 +445,9 @@ Contributions are welcome! Please:
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Make your changes with proper documentation
-4. Test thoroughly (see [Verification](#verification) section)
-5. Submit a pull request
+4. Run the test suite (`uv run pytest`) and make sure everything passes
+5. Run `opendrop-doctor` on your machine and include the output in the PR
+6. Submit a pull request
 
 **Code Style:**
 - Follow PEP 8
