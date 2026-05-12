@@ -76,7 +76,8 @@ class AirDropServer:
     def _init_service(self):
         properties = self.get_properties()
         server = self.config.host_name + ".local."
-        service_name = self.config.service_id + "._airdrop._tcp.local."
+        # Use computer_name for display in Bonjour/mDNS, service_id is in properties
+        service_name = self.config.computer_name + "._airdrop._tcp.local."
         info = ServiceInfo(
             "_airdrop._tcp.local.",
             service_name,
@@ -84,6 +85,7 @@ class AirDropServer:
             properties=properties,
             server=server,
             addresses=[self.ip_addr.packed],
+            interface_index=None,
         )
         return info
 

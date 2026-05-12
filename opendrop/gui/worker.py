@@ -89,6 +89,9 @@ class BrowseWorker(QThread):
 
             def on_device_removed(info):
                 try:
+                    if info is None:
+                        logger.debug("Device removal called with None info")
+                        return
                     name = info.name.split(".")[0]
                     logger.debug(f"Device removed: {name}")
                     self.device_removed.emit(name)
@@ -302,6 +305,8 @@ class ReceiveWorker(QThread):
 
             self.server.Handler.handle_upload = handle_upload_wrapper
 
+            # Register mDNS service and start server
+            self.server.start_service()
             logger.info("Starting server, waiting for incoming files...")
             self.server.start_server()
 

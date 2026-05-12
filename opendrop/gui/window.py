@@ -174,7 +174,11 @@ class MainWindow(QWidget):
         # ===== Info & Settings =====
         info_layout = QHBoxLayout()
 
-        self.info_label = QLabel(f"Interface: {self.settings.interface} | WiFi: {self.settings.wifi_interface}")
+        interface_text = (
+            f"Interface: {self.settings.interface} | "
+            f"WiFi: {self.settings.wifi_interface}"
+        )
+        self.info_label = QLabel(interface_text)
         info_layout.addWidget(self.info_label)
 
         settings_btn = QPushButton("Settings")
@@ -252,11 +256,28 @@ class MainWindow(QWidget):
             self.owl_manager.start(warn_on_disruption=False)
 
     def _on_refresh_devices(self) -> None:
-        """Refresh the device list."""
+        """Refresh the device list.
+
+        Works with or without OWL:
+        - With OWL (AWDL): Uses awdl0 interface for AWDL discovery
+        - Without OWL (Option A): Uses WiFi interface for Bonjour/mDNS discovery
+        """
         logger.info("User clicked Refresh Devices")
 
-        if not self.owl_manager.is_running():
-            QMessageBox.warning(self, "OWL Not Running", "Start OWL first to discover devices")
+        # Verify we have a valid interface with IPv6
+        interface = self.settings.interface
+        ip_addr = AirDropUtil.get_ip_for_interface(interface, ipv6=True)
+
+        if ip_addr is None:
+            QMessageBox.warning(
+                self,
+                "No IPv6 Address",
+                f"Interface {interface!r} does not have an IPv6 address.\n\n"
+                "Make sure:\n"
+                "1. WiFi is connected\n"
+                "2. IPv6 is enabled\n"
+                "3. Interface name is correct in Settings",
+            )
             return
 
         self.device_list.clear()
@@ -276,14 +297,30 @@ class MainWindow(QWidget):
             self.browse_worker.error.connect(self._on_browse_error)
             self.browse_worker.start()
 
-            logger.info("Device browsing started")
+            logger.info(f"Device browsing started on interface {interface}")
         except Exception as e:
             logger.error(f"Failed to start device browsing: {e}")
             QMessageBox.critical(self, "Error", f"Failed to start browsing: {e}")
 
     def _on_device_found(self, device_info: Dict) -> None:
-        """Add a discovered device to the list."""
+        """Add or update a discovered device in the list.
+
+        If the device already exists, update its info instead of creating a duplicate.
+        """
+        device_id = device_info.get("id")
         name = device_info.get("name", "Unknown")
+
+        # Check if device already exists
+        for i in range(self.device_list.count()):
+            item = self.device_list.item(i)
+            existing_info = item.data(Qt.ItemDataRole.UserRole)
+            if existing_info.get("id") == device_id:
+                # Update existing device info
+                item.setData(Qt.ItemDataRole.UserRole, device_info)
+                logger.debug(f"Device info updated: {name}")
+                return
+
+        # Device not found, add new entry
         item_text = f"{name}"
         item = QListWidgetItem(item_text)
         item.setData(Qt.ItemDataRole.UserRole, device_info)
@@ -292,9 +329,14 @@ class MainWindow(QWidget):
 
     def _on_device_removed(self, device_id: str) -> None:
         """Remove a device from the list."""
+        if not device_id:
+            logger.debug("Device removal called with empty device_id")
+            return
+
         for i in range(self.device_list.count()):
             item = self.device_list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole).get("id") == device_id:
+            item_data = item.data(Qt.ItemDataRole.UserRole)
+            if item_data and item_data.get("id") == device_id:
                 self.device_list.takeItem(i)
                 logger.debug(f"Device removed from list: {device_id}")
                 break
@@ -373,8 +415,20 @@ class MainWindow(QWidget):
         if state == Qt.CheckState.Checked.value:
             logger.info("User enabled receiving")
 
-            if not self.owl_manager.is_running():
-                QMessageBox.warning(self, "OWL Not Running", "Start OWL first to receive files")
+            # Verify interface has IPv6 for Bonjour/mDNS discovery
+            interface = self.settings.interface
+            ip_addr = AirDropUtil.get_ip_for_interface(interface, ipv6=True)
+
+            if ip_addr is None:
+                QMessageBox.warning(
+                    self,
+                    "No IPv6 Address",
+                    f"Interface {interface!r} does not have an IPv6 address.\n\n"
+                    "Make sure:\n"
+                    "1. WiFi is connected\n"
+                    "2. IPv6 is enabled\n"
+                    "3. Interface name is correct in Settings",
+                )
                 self.receive_checkbox.setChecked(False)
                 return
 
@@ -425,9 +479,11 @@ class MainWindow(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             logger.info("Settings updated")
             # Reload settings for display
-            self.info_label.setText(
-                f"Interface: {self.settings.interface} | WiFi: {self.settings.wifi_interface}"
+            interface_text = (
+                f"Interface: {self.settings.interface} | "
+                f"WiFi: {self.settings.wifi_interface}"
             )
+            self.info_label.setText(interface_text)
 
     def closeEvent(self, event) -> None:
         """Clean up worker threads on window close."""

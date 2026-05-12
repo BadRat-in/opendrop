@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 class AirDropBrowser:
     def __init__(self, config):
+        self.config = config
         self.ip_addr = AirDropUtil.get_ip_for_interface(config.interface, ipv6=True)
         if self.ip_addr is None:
             if config.interface == "awdl0":
@@ -80,10 +81,32 @@ class AirDropBrowser:
             self.callback_add(info)
 
     def remove_service(self, zeroconf, service_type, name):
-        info = zeroconf.get_service_info(service_type, name)
+        """
+        Handle service removal. The service may already be gone from the registry,
+        so info could be None.
+        """
+        try:
+            info = zeroconf.get_service_info(service_type, name)
+        except Exception as e:
+            logger.debug(f"Error getting service info during removal: {e}")
+            info = None
+
         logger.debug(f"Remove service {name}")
         if self.callback_remove is not None:
             self.callback_remove(info)
+
+    def update_service(self, zeroconf, service_type, name):
+        """
+        Called when a service is updated (e.g., address or properties changed).
+        Re-emit as a device found event to refresh the device info without removing it.
+        """
+        try:
+            info = zeroconf.get_service_info(service_type, name)
+            logger.debug(f"Update service {name}")
+            if self.callback_add is not None and info is not None:
+                self.callback_add(info)
+        except Exception as e:
+            logger.debug(f"Error updating service {name}: {e}")
 
 
 class AirDropClient:
@@ -238,36 +261,56 @@ class AirDropClient:
 
 class HTTPSConnectionAWDL(HTTPSConnection):
     """
-    This class allows to bind the HTTPConnection to a specific network interface
+    Binds HTTPSConnection to a specific network interface for IPv6 with zone IDs.
+
+    Supports modern SSL context-based initialization while maintaining backward
+    compatibility with deprecated key_file/cert_file parameters.
     """
 
     def __init__(
         self,
         host,
         port=None,
-        key_file=None,
-        cert_file=None,
-        timeout=None,
+        timeout=socket.getdefaulttimeout(),
         source_address=None,
         *,
         context=None,
         check_hostname=None,
         interface_name=None,
+        # Deprecated parameters for backward compatibility
+        key_file=None,
+        cert_file=None,
     ):
-
+        # Bind interface to IPv6 address with zone ID if needed
         if interface_name is not None:
             if "%" not in host:
-                if isinstance(ipaddress.ip_address(host), ipaddress.IPv6Address):
-                    host = host + "%" + interface_name
+                try:
+                    if isinstance(ipaddress.ip_address(host), ipaddress.IPv6Address):
+                        host = host + "%" + interface_name
+                except ValueError:
+                    pass  # Not an IP address, skip zone binding
 
-        if timeout is None:
-            timeout = socket.getdefaulttimeout()
+        # Create SSL context from deprecated key_file/cert_file if context not provided
+        if context is None and (key_file is not None or cert_file is not None):
+            import ssl
+
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            if cert_file:
+                context.load_cert_chain(cert_file, keyfile=key_file)
+
+        # Ensure we have a context for HTTPS
+        if context is None:
+            import ssl
+
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
 
         super(HTTPSConnectionAWDL, self).__init__(
             host=host,
             port=port,
-            key_file=key_file,
-            cert_file=cert_file,
             timeout=timeout,
             source_address=source_address,
             context=context,
